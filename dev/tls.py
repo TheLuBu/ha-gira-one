@@ -1,6 +1,6 @@
 """Create disposable certificates for the isolated development network."""
 
-import datetime
+import datetime as dt
 import ipaddress
 import ssl
 from pathlib import Path
@@ -19,7 +19,7 @@ def create_tls_context(
     directory.mkdir(parents=True, exist_ok=True)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Gira development")])
-    now = datetime.datetime.now(datetime.UTC)
+    now = dt.datetime.now(dt.UTC)
     alternative_names = []
     for host in hosts:
         try:
@@ -34,8 +34,8 @@ def create_tls_context(
         .issuer_name(name)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(minutes=1))
-        .not_valid_after(now + datetime.timedelta(days=7))
+        .not_valid_before(now - dt.timedelta(minutes=1))
+        .not_valid_after(now + dt.timedelta(days=7))
         .add_extension(
             x509.SubjectAlternativeName(alternative_names),
             critical=False,
