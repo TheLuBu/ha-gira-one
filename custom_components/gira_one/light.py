@@ -198,8 +198,8 @@ class GiraLight(GiraOneEntity, LightEntity):
         payloads = []
         has_brightness = ATTR_BRIGHTNESS in kwargs and self._has_dp(DP_BRIGHTNESS)
 
-        # Re-sending ON while dimming can recall the actuator's switch-on brightness.
-        if self._has_dp(DP_ON_OFF) and not (has_brightness and self.is_on):
+        # Brightness also switches on; an extra ON can recall switch-on brightness.
+        if self._has_dp(DP_ON_OFF) and not has_brightness:
             payloads.append({"uid": self._get_dp_uid(DP_ON_OFF), "value": 1})
 
         # Brightness

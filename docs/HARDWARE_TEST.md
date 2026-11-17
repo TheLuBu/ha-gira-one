@@ -101,10 +101,16 @@ brightness feedback even if the light is already on. Previously every HA brightn
 change included that switch command, causing callbacks for the requested value,
 then 100%, then the final actuator value about 2–5 seconds later.
 
-For an already-on light, brightness changes now send only `Brightness`. Hardware
-checks on both kitchen dimmers (100 → 25 → 75 → 25%) returned the target and final
-quantized values without the 100% excursion. Off or unknown lights retain the
-explicit switch-on; plain ON commands and genuine 100% callbacks remain intact.
+Brightness requests now send only `Brightness`, including from off or unknown
+states. Hardware checks on both kitchen dimmers (100 → 25 → 75 → 25%) returned
+the target and final quantized values without the 100% excursion. A subsequent
+test started the two lights directly from OFF at 25% and 75% using only
+`Brightness`: both reported `OnOff=1` themselves and final values of 25.098039%
+and 74.901961%. No 100% callback occurred, and the user confirmed no visible flash.
+Plain ON/OFF commands and genuine 100% callbacks remain intact. Commands do not
+optimistically set the HA state; incoming device feedback remains authoritative.
+The hardware result is verified for these two dimmers on firmware 4.0.465.0;
+other actuator configurations have not been tested.
 When repeating this check, compare incoming callbacks as well as the final UI
 value, and restore the lights' initial state afterward.
 
