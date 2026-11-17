@@ -11,6 +11,10 @@ __pycache__
 .vscode
 coverage.xml
 .ruff_cache
+.venv/
+.env
+.dev-baseline/
+.dev-baseline.tar
 
 
 # Jetbrains

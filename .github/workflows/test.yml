@@ -1,0 +1,30 @@
+name: Test
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Regression tests
+        run: docker compose run --rm --build tests
+      - name: Start disposable Home Assistant and Gira simulator
+        run: docker compose --profile demo up -d --build gira homeassistant
+      - name: Complete config flow, commands, callbacks and reload
+        run: docker compose run --rm tests python -m dev.smoke
+      - name: Test logs
+        if: failure()
+        run: docker compose --profile demo logs --tail 100 homeassistant gira
+      - name: Stop disposable services
+        if: always()
+        run: docker compose --profile demo stop homeassistant gira

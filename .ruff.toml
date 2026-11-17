@@ -23,6 +23,7 @@ ignore = [
     "E501",     # line-too-long (handled by formatter where possible)
     "EM101",    # raw-string-in-exception
     "EM102",    # f-string-in-exception
+    "EXE002",   # Windows Docker bind mounts report Python files as executable
     "FBT001",   # boolean-type-hint-positional-argument
     "FBT002",   # boolean-default-value-positional-argument
     "FBT003",   # boolean-positional-value-in-call
@@ -47,6 +48,10 @@ ignore = [
 
 [lint.flake8-pytest-style]
 fixture-parentheses = false
+
+[lint.per-file-ignores]
+"tests/*" = ["PT009", "PT027"]  # Tests use the standard library's unittest
+"dev/smoke.py" = ["T201"]  # Command-line smoke test reports its results
 
 [lint.pyupgrade]
 keep-runtime-typing = true

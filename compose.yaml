@@ -1,0 +1,43 @@
+name: ha-gira-dev
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${GIRA_DEV_SUBNET:-10.254.230.0/24}
+services:
+  tests:
+    build: .
+    volumes:
+      - ${GIRA_COMPONENTS_DIR:-./custom_components}:/workspace/custom_components:ro
+      - ./tests:/workspace/tests:ro
+      - ./dev:/workspace/dev:ro
+      - ./.ruff.toml:/workspace/.ruff.toml:ro
+
+  gira:
+    build: .
+    profiles: [demo]
+    command: [python, -m, dev.mock_gira]
+    environment:
+      GIRA_MOCK_API_VERSION: ${GIRA_MOCK_API_VERSION:-v2}
+    volumes:
+      - ./dev:/workspace/dev:ro
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request,ssl; urllib.request.urlopen('https://localhost:8443/api/v2/',context=ssl._create_unverified_context(),timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  homeassistant:
+    build: .
+    profiles: [demo]
+    command: [python, -m, dev.start_homeassistant]
+    ports:
+      - "127.0.0.1:18123:8123"
+    tmpfs:
+      - /config:uid=1000,gid=1000
+    volumes:
+      - ${GIRA_COMPONENTS_DIR:-./custom_components}:/config/custom_components:ro
+      - ./dev:/workspace/dev:ro
+    depends_on:
+      gira:
+        condition: service_healthy
