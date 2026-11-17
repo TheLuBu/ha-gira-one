@@ -201,6 +201,38 @@ class GiraV3Tests(baseline.GiraBaselineTests):
                 )
                 other_refresh.request.assert_not_called()
 
+    async def test_empty_failure_callback_repairs_a_stale_switch(self) -> None:
+        """An authenticated HTTP callback reaches the subscribed entity via a GET."""
+        await self.client.register_client("urn:homeassistant:test")
+        url = await self.callback_url()
+        config = await self.client.get_ui_config()
+        refresh = _StateRefresh(self.hass, "test-entry", self.client)
+        self.hass.data[DOMAIN]["test-entry"].update(
+            {DATA_UI_CONFIG: config, "refresh": refresh}
+        )
+        switch = GiraSwitch(
+            Mock(entry_id="test-entry"), self.client, config["functions"][0], "hub"
+        )
+        switch.hass = self.hass
+        with (
+            patch.object(switch, "async_on_remove", side_effect=self.addCleanup),
+            patch.object(switch, "async_write_ha_state") as write_state,
+        ):
+            await switch.async_added_to_hass()
+            self.assertFalse(switch.is_on)
+            self.simulator.values["aaab"] = "1"
+            self.simulator.requests.clear()
+            async with self.session.post(
+                url, json={"token": TOKEN, "events": [], "failures": 1}
+            ) as response:
+                self.assertEqual(response.status, 200)
+            await self.hass.async_block_till_done()
+            self.assertTrue(switch.is_on)
+            write_state.assert_called_once_with()
+            self.assertEqual(
+                self.simulator.requests, [("GET", "/api/v3/values/aaab", {})]
+            )
+
     async def test_overlapping_failures_and_unload(self) -> None:
         """One follow-up covers losses mid-read; unload cancels that read."""
         refresh = _StateRefresh(self.hass, "test-entry", self.client)
