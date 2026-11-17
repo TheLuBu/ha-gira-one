@@ -5,11 +5,21 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Validate](https://github.com/tbsv/ha-gira-one/actions/workflows/validate.yml/badge.svg)](https://github.com/tbsv/ha-gira-one/actions/workflows/validate.yml)
 
-This integration connects Home Assistant to a **Gira One Server** via its local REST API. It is based on the [Gira IoT REST API specification](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf).
+This integration connects Home Assistant to a **Gira One Server** via its local REST API. It is based on the [Gira IoT REST API v3 specification](https://partner.gira.de/data3/Gira_IoT_REST_API_v3_DE.pdf), with automatic fallback to [v2](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf) when the v3 endpoint is unavailable (HTTP 404).
 It exposes lights, covers, and room thermostats as native Home Assistant entities and receives real-time status updates via callbacks (Local Push), so state changes made at the physical switch or in the Gira app are immediately reflected in Home Assistant.
 
 > [!IMPORTANT]
 > **Home Assistant must be reachable from the Gira One Server via an HTTPS URL.** The Gira One Server pushes state updates back to Home Assistant via HTTP callbacks and explicitly rejects non-HTTPS targets. Either an *internal* or an *external* URL works, as long as it uses `https://` and the Gira Server can reach it on the network. The integration will refuse to set up if no HTTPS URL is configured.
+
+## API v3 compatibility
+
+- The API version is detected during initial configuration, integration setup/reload and removal. Existing config entries, client IDs and entity unique IDs are preserved.
+- v3 callback registration enables `batchEvents`; every event in a callback batch is processed. v2 registration omits that option.
+- Additional `uidLength`, `iconID` and `scenes` metadata is accepted without changing the existing platform mapping. This update does not add a scene or camera platform.
+- v3 can suppress value callbacks after an event storm. A read-only reconciliation every five minutes recovers current states while callbacks are missing. It does not reset the server's protection or recover intermediate events.
+- HTTP 429 starts a five-second request cooldown. Commands are not automatically replayed. Invalid-token responses start reauthentication; access denied to an individual UID does not.
+
+See [Local development](docs/DEVELOPMENT.md) for the reproducible HA runtime, HTTPS simulator, tests and the hardware checks still required before release.
 
 ## Features
 

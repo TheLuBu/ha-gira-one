@@ -85,10 +85,25 @@ The unmodified integration from upstream commit
 the initial three baseline tests and the real HA/v2 simulator smoke test before
 the API migration. That is local simulator evidence, not hardware certification.
 
-The first development commit adds this environment while keeping the integration
+Development commit `a33d125` adds this environment while keeping the integration
 source unchanged. Check out that commit in a separate checkout to reproduce the
 original baseline, then use the same commands above. The following feature commit
 contains the API migration and its additional regression tests.
+
+After the migration, the regression suite exercises v3 and v2. GitHub Actions
+also runs the complete HA smoke test separately against both simulator versions.
+The v3 client opts into batched callbacks and performs a read-only state refresh
+every five minutes. This recovers current state if callbacks are suppressed; it
+cannot restore intermediate events or disable the firmware's protection.
+
+HTTP 429 starts a five-second client cooldown. Failed commands are surfaced and
+are never replayed automatically. A hidden UID returning `invalidAuth` is kept
+separate from `invalidToken`, which triggers HA reauthentication.
+
+Contract sources:
+
+- [Gira IoT REST API v3, 2026-08-31](https://partner.gira.de/data3/Gira_IoT_REST_API_v3_DE.pdf), sections 2.2, 2.3, 3, 4.4, 4.7, 5.2 and 6.
+- [Gira IoT REST API v2](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf) for the backwards-compatible fallback.
 
 ## Hardware check before release
 

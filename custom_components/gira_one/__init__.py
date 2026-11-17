@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 from aiohttp import web
@@ -13,6 +14,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .api import (
@@ -23,6 +25,7 @@ from .api import (
     GiraApiRequestError,
 )
 from .const import (
+    API_VERSION,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -101,6 +104,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_client.set_credentials(token=access_token, client_id=client_id)
 
     try:
+        await api_client.check_api_availability()
         _LOGGER.debug("Attempting to fetch UI config with stored token")
         ui_config = await api_client.get_ui_config()
     except GiraApiAuthError:
@@ -166,6 +170,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "is reachable from the Gira One Server via an HTTPS URL"
         )
 
+    if api_client.api_version == API_VERSION:
+
+        async def _refresh_states(_now: datetime) -> None:
+            await _async_refresh_states(hass, entry.entry_id, api_client)
+
+        # v3 may suppress callbacks after an event storm without notifying clients.
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                _refresh_states,
+                timedelta(minutes=5),
+            )
+        )
+
     # Ensure the Gira client is cleanly unregistered when HA shuts down
     entry.async_on_unload(
         hass.bus.async_listen_once(
@@ -177,6 +195,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     return True
+
+
+async def _async_refresh_states(
+    hass: HomeAssistant, entry_id: str, api_client: GiraApiClient
+) -> None:
+    """Reconcile readable states without writing values or generating Gira events."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not entry_data:
+        return
+    try:
+        for function in entry_data[DATA_UI_CONFIG].get("functions", []):
+            if function.get("functionType") not in GIRA_FUNCTION_TYPE_TO_HA_PLATFORM:
+                continue
+            if not any(dp.get("canRead") for dp in function.get("dataPoints", [])):
+                continue
+            data = await api_client.get_value(function["uid"])
+            for datapoint in data.get("values", []):
+                async_dispatcher_send(
+                    hass,
+                    f"{SIGNAL_DATA_UPDATE}_{entry_id}",
+                    datapoint["uid"],
+                    datapoint["value"],
+                )
+    except GiraApiClientError as err:
+        # Stop this pass on errors, including 429, instead of hammering the server.
+        _LOGGER.warning("Could not reconcile Gira states: %s", err)
 
 
 async def _async_register_device(
@@ -320,6 +364,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     api_client = GiraApiClient(host, username, password, hass)
     api_client.set_credentials(token=access_token, client_id=client_id)
     try:
+        await api_client.check_api_availability()
         await api_client.unregister_client()
     except GiraApiClientError:
         _LOGGER.warning("Could not unregister client during entry removal")
@@ -360,7 +405,10 @@ class BaseGiraCallbackView(HomeAssistantView):
             _LOGGER.warning("Received invalid JSON in Gira callback %s", self.url)
             return self.json_message("Invalid JSON", status_code=400)
 
-        _LOGGER.debug("Received Gira callback on %s: %s", self.url, data)
+        if not isinstance(data, dict):
+            return self.json_message("Expected a JSON object", status_code=400)
+
+        _LOGGER.debug("Received Gira callback on %s", self.url)
 
         api_client: GiraApiClient | None = (
             self.hass.data.get(DOMAIN, {}).get(self.entry_id, {}).get(DATA_API_CLIENT)
@@ -376,7 +424,12 @@ class BaseGiraCallbackView(HomeAssistantView):
             _LOGGER.error("Mismatched token in Gira callback; ignoring")
             return self.json_message("Token mismatch", status_code=404)
 
-        await self.process_events(data.get("events", []), api_client)
+        events = data.get("events", [])
+        if not isinstance(events, list) or any(
+            not isinstance(event, dict) for event in events
+        ):
+            return self.json_message("Invalid events", status_code=400)
+        await self.process_events(events, api_client)
         return self.json({}, status_code=200)
 
     async def process_events(self, events: list, api_client: GiraApiClient) -> None:

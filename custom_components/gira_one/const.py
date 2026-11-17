@@ -17,7 +17,8 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"  # noqa: S105
 
 # API constants
-API_VERSION = "v2"
+API_VERSION = "v3"
+API_FALLBACK_VERSION = "v2"
 CLIENT_URN_PREFIX = "urn:homeassistant:gira_one"
 
 # Data
