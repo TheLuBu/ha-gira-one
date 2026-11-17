@@ -87,16 +87,35 @@ async def smoke() -> None:
                 raise RuntimeError(f"Expected switch state {expected}, got {switches}")
             print(f"PASS: {entity_id} = {expected}")
         print("PASS: real config flow, entity setup, HTTPS commands and push callbacks")
+        async with session.get(f"{BASE_URL}/api/states") as response:
+            response.raise_for_status()
+            scenes = {
+                state["entity_id"]
+                for state in await response.json()
+                if state["entity_id"].startswith("scene.")
+            }
+        if not scenes:
+            raise RuntimeError("Simulator scenes missing after discovery")
+        async with session.post(
+            f"{BASE_URL}/api/services/scene/turn_on",
+            json={"entity_id": min(scenes)},
+        ) as response:
+            response.raise_for_status()
         async with session.post(
             f"{BASE_URL}/api/config/config_entries/entry/{result['result']['entry_id']}/reload"
         ) as response:
             response.raise_for_status()
         async with session.get(f"{BASE_URL}/api/states") as response:
             response.raise_for_status()
+            states = await response.json()
+            if {
+                state["entity_id"]
+                for state in states
+                if state["entity_id"].startswith("scene.")
+            } != scenes:
+                raise RuntimeError("Reload changed the scene identities")
             switches = [
-                state
-                for state in await response.json()
-                if state["entity_id"].startswith("switch.")
+                state for state in states if state["entity_id"].startswith("switch.")
             ]
         if (
             len(switches) != 1

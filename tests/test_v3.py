@@ -38,7 +38,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         await self.client.register_client("urn:homeassistant:test")
         config = await self.client.get_ui_config()
         self.assertEqual(config["functions"][0]["uid"], "aaaa")
-        self.assertIn("scenes", config["functions"][0])
+        self.assertIn("scenes", config["functions"][1])
         self.assertTrue(
             await self.client.register_callbacks(
                 "https://homeassistant/service", "https://homeassistant/value"

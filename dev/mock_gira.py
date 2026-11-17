@@ -31,7 +31,7 @@ class GiraSimulator:
         self.version = version
         self.registered = False
         self.callbacks: dict = {}
-        self.values = {"aaab": "0"}
+        self.values = {"aaab": "0", "bbba": "0"}
         self.clock = clock
         self.global_events: deque[float] = deque()
         self.point_events: dict[str, deque[float]] = defaultdict(deque)
@@ -203,12 +203,41 @@ class GiraSimulator:
                             "canEvent": True,
                         }
                     ],
+                    **({"iconID": 15} if version == "v3" else {}),
+                },
+                {
+                    "uid": "bbbb",
+                    "displayName": "Evening",
+                    "functionType": "de.gira.schema.functions.FunctionScene"
+                    if version == "v3"
+                    else "de.gira.schema.functions.Scene",
+                    "channelType": "de.gira.schema.channels.FunctionScene"
+                    if version == "v3"
+                    else "de.gira.schema.channels.SceneSet",
+                    "dataPoints": [
+                        {
+                            "uid": "bbba",
+                            "name": "Execute",
+                            "canRead": False,
+                            "canWrite": True,
+                            "canEvent": True,
+                        }
+                    ],
                     **(
-                        {"iconID": 1, "scenes": [{"name": "Test scene", "number": 1}]}
+                        {
+                            "scenes": [
+                                {"name": "Dinner", "number": 2},
+                                {"name": "Relax", "number": 4},
+                            ]
+                        }
                         if version == "v3"
-                        else {}
+                        else {
+                            "parameters": [
+                                {"set": "Standard", "key": "Scene", "value": "2"}
+                            ]
+                        }
                     ),
-                }
+                },
             ],
             "locations": [{"displayName": "Test room", "functions": ["aaaa"]}],
             "trades": [],

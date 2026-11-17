@@ -15,7 +15,7 @@ It exposes lights, covers, and room thermostats as native Home Assistant entitie
 
 - The API version is detected during initial configuration, integration setup/reload and removal. Existing config entries, client IDs and entity unique IDs are preserved.
 - v3 callback registration enables `batchEvents`; every event in a callback batch is processed. v2 registration omits that option.
-- Additional `uidLength`, `iconID` and `scenes` metadata is accepted without changing the existing platform mapping. This update does not add a scene or camera platform.
+- Gira scenes appear under their function device when the server supplies a scene number and writable recall datapoint. Each activation sends the published number once.
 - v3 can suppress value callbacks after an event storm. A read-only reconciliation every five minutes recovers current states while callbacks are missing. It does not reset the server's protection or recover intermediate events.
 - HTTP 429 starts a five-second request cooldown. Commands are not automatically replayed. Invalid-token responses start reauthentication; access denied to an individual UID does not.
 
@@ -29,6 +29,7 @@ See [Local development](docs/DEVELOPMENT.md) for the reproducible HA runtime, HT
 | **Light** | On/off, brightness (dimming), color temperature (tunable white), RGB/W color |
 | **Cover** | Open, close, stop, set position, set tilt (slat) position — for roller shutters and venetian blinds |
 | **Climate** | Current temperature, target temperature, HVAC mode, preset modes (Comfort, Eco/Night, Away/Standby, Protection) |
+| **Scene** | Activate a numbered Gira scene |
 | **Sensor** | Current and target temperature exposed as dedicated sensor entities per Gira climate function (for graphing and automations) |
 
 ### Supported Gira function types
@@ -43,6 +44,19 @@ Behind the scenes, the following Gira function types are mapped automatically:
 - `de.gira.schema.functions.KNX.HeatingCooling` → Climate
 - `de.gira.schema.functions.KNX.FanCoil` → Climate
 - `de.gira.schema.functions.SaunaHeating` → Climate
+
+### Scene discovery
+
+`FunctionScene` and legacy `SceneSet` recall through `Execute`. Legacy
+`SceneControl` recalls through `Scene`. Only a writable recall point is used.
+HA never sends a teach command. v3 supplies scene names and numbers in
+`scenes`. When that list is missing or empty, a configured GPA `Scene`
+parameter can supply the number (also on v2). A function without either
+source is skipped. Renaming a scene preserves its identity as long as its
+function UID and scene number are stable.
+
+See the [REST API channel definitions, sections 5.2 and 10](https://partner.gira.de/data3/Gira_IoT_REST_API_v3_DE.pdf)
+and [GPA project interface, scene parameters](https://partner.gira.com/data3/GPA_Project_Interface_Documentation.pdf).
 
 ## Prerequisites
 
