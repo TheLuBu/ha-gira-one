@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from ipaddress import ip_address
 from typing import Any
+from urllib.parse import urlsplit
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -157,18 +159,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_HUB_DEVICE_ID: hub_device_id,
     }
 
-    # Clean up orphaned entries for functions removed from the Gira project
-    _async_cleanup_stale_devices(hass, entry, ui_config)
-
-    # Set up platforms
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
     # Register callback views with HA and callback URLs with the Gira device
     if not await _async_register_callbacks(hass, entry, api_client):
+        hass.data[DOMAIN].pop(entry.entry_id, None)
         raise ConfigEntryNotReady(
             "Could not register Gira One callback URLs. Ensure Home Assistant "
             "is reachable from the Gira One Server via an HTTPS URL"
         )
+
+    # Register callbacks before loading platforms, so a failed attempt can retry cleanly.
+    _async_cleanup_stale_devices(hass, entry, ui_config)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     if api_client.api_version == API_VERSION:
 
@@ -288,6 +289,7 @@ async def _async_register_callbacks(
             require_ssl=True,
             allow_internal=True,
             allow_external=True,
+            allow_ip=True,
             prefer_external=True,
         )
     except NoURLAvailableError:
@@ -295,6 +297,18 @@ async def _async_register_callbacks(
             "Cannot determine an HTTPS URL for Gira callbacks. The Gira One "
             "Server only accepts HTTPS callback URLs. Configure either an "
             "internal_url or external_url with https:// in Home Assistant"
+        )
+        return False
+
+    hostname = urlsplit(base_url).hostname
+    try:
+        address = ip_address(hostname)
+        invalid_host = address.is_loopback or address.is_unspecified
+    except ValueError:
+        invalid_host = hostname == "localhost"
+    if invalid_host:
+        _LOGGER.error(
+            "Gira callbacks require a reachable address, not localhost or a loopback IP"
         )
         return False
 
@@ -308,7 +322,11 @@ async def _async_register_callbacks(
     hass.http.register_view(GiraValueCallbackView(hass, entry.entry_id))
 
     try:
-        await api_client.register_callbacks(service_callback_url, value_callback_url)
+        if not await api_client.register_callbacks(
+            service_callback_url, value_callback_url
+        ):
+            _LOGGER.error("Gira callback registration did not succeed")
+            return False
     except GiraApiClientError as err:
         _LOGGER.error("Failed to register Gira callbacks: %s", err)
         return False
