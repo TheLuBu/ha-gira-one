@@ -85,7 +85,7 @@ The unmodified integration from upstream commit
 the initial three baseline tests and the real HA/v2 simulator smoke test before
 the API migration. That is local simulator evidence, not hardware certification.
 
-Development commit `a33d125` adds this environment while keeping the integration
+Development commit `0bf0f69` adds this environment while keeping the integration
 source unchanged. Check out that commit in a separate checkout to reproduce the
 original baseline, then use the same commands above. The following feature commit
 contains the API migration and its additional regression tests.
@@ -106,6 +106,9 @@ Contract sources:
 - [Gira IoT REST API v2](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf) for the backwards-compatible fallback.
 
 ## Hardware check before release
+
+Use the separate [`hardware` profile](HARDWARE_TEST.md) for the real server.
+The `demo` profile and `dev.smoke` remain simulator-only.
 
 Use a separate HA test installation with its own instance ID and Gira client ID.
 Do not copy the production `.storage` directory: callbacks are registered per

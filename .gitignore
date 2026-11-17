@@ -13,6 +13,8 @@ coverage.xml
 .ruff_cache
 .venv/
 .env
+.env.hardware
+.hardware/
 .dev-baseline/
 .dev-baseline.tar
 

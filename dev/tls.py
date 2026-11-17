@@ -11,12 +11,23 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
 
-def create_tls_context(directory: Path) -> ssl.SSLContext:
+def create_tls_context(
+    directory: Path,
+    hosts: tuple[str, ...] = ("localhost", "gira", "homeassistant", "127.0.0.1"),
+) -> ssl.SSLContext:
     """Write a temporary self-signed certificate; never use it in production."""
     directory.mkdir(parents=True, exist_ok=True)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Gira development")])
     now = datetime.datetime.now(datetime.UTC)
+    alternative_names = []
+    for host in hosts:
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            alternative_names.append(x509.DNSName(host))
+        else:
+            alternative_names.append(x509.IPAddress(address))
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -26,14 +37,7 @@ def create_tls_context(directory: Path) -> ssl.SSLContext:
         .not_valid_before(now - datetime.timedelta(minutes=1))
         .not_valid_after(now + datetime.timedelta(days=7))
         .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.DNSName("localhost"),
-                    x509.DNSName("gira"),
-                    x509.DNSName("homeassistant"),
-                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-                ]
-            ),
+            x509.SubjectAlternativeName(alternative_names),
             critical=False,
         )
         .sign(key, hashes.SHA256())

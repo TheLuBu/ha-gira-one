@@ -5,6 +5,19 @@ networks:
       config:
         - subnet: ${GIRA_DEV_SUBNET:-10.254.230.0/24}
 services:
+  hardware:
+    build: .
+    profiles: [hardware]
+    command: [python, -m, dev.start_hardware]
+    environment:
+      GIRA_TEST_URL: ${GIRA_TEST_URL:-}
+    ports:
+      - "${GIRA_TEST_BIND_IP:-127.0.0.1}:${GIRA_TEST_PORT:-18124}:8123"
+    volumes:
+      - ./.hardware/config:/config
+      - ./custom_components:/config/custom_components:ro
+      - ./dev:/workspace/dev:ro
+
   tests:
     build: .
     volumes:
