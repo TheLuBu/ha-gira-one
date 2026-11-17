@@ -21,6 +21,8 @@ It exposes lights, covers, and room thermostats as native Home Assistant entitie
 
 See [Local development](docs/DEVELOPMENT.md) for the reproducible HA runtime, HTTPS simulator, tests and the hardware checks still required before release.
 
+See the [firmware 4.0 support matrix](docs/FIRMWARE_4_CHANNELS.md) for the channel contracts, fixture coverage and platform limits.
+
 ## Features
 
 | Platform | Capabilities |
