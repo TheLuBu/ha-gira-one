@@ -121,6 +121,17 @@ devices, a physical switch update, commands, HA reload/restart and reconnects.
 Back up the normal HA installation before replacing its installed integration.
 Do not commit real passwords, access tokens, HA config directories or API captures.
 
-The simulator only covers one switch and documented request/response shapes.
-It does not emulate firmware's callback storm suppression, certificate trust,
-every function/channel type, bus behavior or user permissions in full.
+The v3 simulator counts bus events in a sliding five-second window before
+batching. The 51st event on one datapoint silences that point until a project
+change. The 501st event across points silences all value callbacks until a
+device restart. Unit tests advance an injected clock and exercise both resets.
+The switch on/off and dimmer brightness trace produces three writes and three
+events. The dimmer sends brightness once. No automatic command replay is needed.
+
+A positive callback `failures` counter reports failed delivery attempts since
+the last success. HA logs the count and schedules a read on the affected entry.
+Silence alone is also consistent with an idle installation. The firmware supplies
+no positive indication of suppression. The five-minute v3 read can recover the
+latest readable state in either case. It cannot reconstruct intermediate events.
+The simulator covers selected documented shapes. Certificate trust, bus traffic
+and user permissions still require separate verification.

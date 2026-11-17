@@ -6,7 +6,10 @@ Credentials and tokens are synthetic and restricted to the development network.
 
 import os
 import tempfile
+from collections import defaultdict, deque
+from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 
 import aiohttp
 from aiohttp import web
@@ -21,12 +24,19 @@ TOKEN = "GiraDevelopmentToken0000000000001"  # noqa: S105
 class GiraSimulator:
     """Keep state across actual HTTP requests from Home Assistant."""
 
-    def __init__(self, version: str = "v2") -> None:
+    def __init__(
+        self, version: str = "v2", clock: Callable[[], float] = monotonic
+    ) -> None:
         """Initialize the synthetic switch and record requests for assertions."""
         self.version = version
         self.registered = False
         self.callbacks: dict = {}
-        self.value = "0"
+        self.values = {"aaab": "0"}
+        self.clock = clock
+        self.global_events: deque[float] = deque()
+        self.point_events: dict[str, deque[float]] = defaultdict(deque)
+        self.suppressed: set[str] = set()
+        self.global_suppression = False
         self.requests: list[tuple[str, str, dict]] = []
         self.error_status: int | None = None
         self.error_code = "generic"
@@ -92,26 +102,77 @@ class GiraSimulator:
             uid = path.split("/")[-1]
             if uid == "aaaa" and request.method == "GET" and self.reject_function_reads:
                 return self.error(422, "unprocessable")
-            if uid not in ("aaaa", "aaab"):
+            if uid == "aaaa" and request.method == "GET":
+                uid = "aaab"
+            if uid not in self.values:
                 return self.error(401, "invalidAuth")
             if request.method == "PUT":
-                self.value = str(body["value"])
-                if self.callbacks.get("valueCallback"):
-                    async with (
-                        aiohttp.ClientSession() as session,
-                        session.post(
-                            self.callbacks["valueCallback"],
-                            json={
-                                "token": TOKEN,
-                                "events": [{"uid": "aaab", "value": self.value}],
-                            },
-                            ssl=False,
-                        ) as response,
-                    ):
-                        await response.read()
+                await self.publish_values([{"uid": uid, "value": body["value"]}])
                 return web.json_response({})
-            return web.json_response({"values": [{"uid": "aaab", "value": self.value}]})
+            return web.json_response(
+                {"values": [{"uid": uid, "value": self.values[uid]}]}
+            )
+        if path == "values" and request.method == "PUT":
+            updates = body["values"]
+            if any(item["uid"] not in self.values for item in updates):
+                return self.error(401, "invalidAuth")
+            await self.publish_values(updates)
+            return web.json_response({})
         return self.error(404, "resourceNotFound")
+
+    def project_changed(self) -> None:
+        """Simulate a project download clearing per-datapoint suppression."""
+        self.point_events.clear()
+        self.suppressed.clear()
+
+    def restart(self) -> None:
+        """Simulate rebooting the development device."""
+        self.project_changed()
+        self.global_events.clear()
+        self.global_suppression = False
+
+    def _allow_event(self, uid: str) -> bool:
+        if self.version != "v3":
+            return True
+        if self.global_suppression:
+            return False
+        now = self.clock()
+        for window in (self.global_events, self.point_events[uid]):
+            while window and window[0] <= now - 5:
+                window.popleft()
+            window.append(now)
+        if len(self.global_events) > 500:
+            self.global_suppression = True
+        if len(self.point_events[uid]) > 50:
+            self.suppressed.add(uid)
+        return not self.global_suppression and uid not in self.suppressed
+
+    async def publish_values(self, updates: list[dict]) -> None:
+        """Apply simulated bus events before filtering and batching their callbacks."""
+        events = []
+        for update in updates:
+            uid = update["uid"]
+            self.values[uid] = str(update["value"])
+            if self._allow_event(uid):
+                events.append({"uid": uid, "value": self.values[uid]})
+        if not events or not self.callbacks.get("valueCallback"):
+            return
+        if self.callbacks.get("batchEvents"):
+            await self._deliver(events)
+        else:
+            for event in events:
+                await self._deliver([event])
+
+    async def _deliver(self, events: list[dict]) -> None:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                self.callbacks["valueCallback"],
+                json={"token": TOKEN, "events": events},
+                ssl=False,
+            ) as response,
+        ):
+            await response.read()
 
     @staticmethod
     def error(status: int, code: str) -> web.Response:

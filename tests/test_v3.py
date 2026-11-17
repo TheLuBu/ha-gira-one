@@ -17,6 +17,7 @@ from custom_components.gira_one import (
 )
 from custom_components.gira_one.api import GiraApiAuthError, GiraApiRequestError
 from custom_components.gira_one.const import DATA_API_CLIENT, DATA_UI_CONFIG, DOMAIN
+from custom_components.gira_one.light import GiraLight
 from custom_components.gira_one.switch import GiraSwitch
 from dev.mock_gira import TOKEN
 
@@ -137,7 +138,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         """Authenticate both routes and preserve ordinary events alongside failures."""
         await self.client.register_client("urn:homeassistant:test")
         config = await self.client.get_ui_config()
-        self.simulator.value = "1"
+        self.simulator.values["aaab"] = "1"
         for view_type, events in (
             (GiraServiceCallbackView, []),
             (GiraValueCallbackView, [{"uid": "aaab", "value": "0"}]),
@@ -239,7 +240,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
                 DATA_UI_CONFIG: await self.client.get_ui_config(),
             }
         }
-        self.simulator.value = "1"
+        self.simulator.values["aaab"] = "1"
         self.simulator.reject_function_reads = True
         self.simulator.requests.clear()
         with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
@@ -249,6 +250,113 @@ class GiraV3Tests(baseline.GiraBaselineTests):
             [(method, path) for method, path, _ in self.simulator.requests],
             [("GET", "/api/v3/values/aaab")],
         )
+
+    async def test_point_suppression_keeps_state_readable(self) -> None:
+        """The 51st event sticks locally; other points still deliver in the batch."""
+        await self.client.register_client("urn:homeassistant:test")
+        await self.client.register_callbacks(
+            "https://demo/service", "https://demo/value"
+        )
+        self.hass.data[DOMAIN] = {
+            "test-entry": {DATA_UI_CONFIG: await self.client.get_ui_config()}
+        }
+        clock = Mock(return_value=0)
+        self.simulator.clock = clock
+        with patch.object(
+            self.simulator, "_deliver", new_callable=AsyncMock
+        ) as deliver:
+            await self.simulator.publish_values(
+                [{"uid": "aaab", "value": n % 2} for n in range(51)]
+                + [{"uid": "aaaa-other", "value": 1}]
+            )
+            self.assertEqual(len(deliver.await_args.args[0]), 51)
+            self.assertEqual(
+                deliver.await_args.args[0][-2:],
+                [{"uid": "aaab", "value": "1"}, {"uid": "aaaa-other", "value": "1"}],
+            )
+            clock.return_value = 10
+            await self.simulator.publish_values([{"uid": "aaab", "value": 0}])
+            deliver.assert_awaited_once()
+            self.simulator.requests.clear()
+            with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
+                await _async_refresh_states(self.hass, "test-entry", self.client)
+            self.assertEqual(dispatch.call_args.args[-2:], ("aaab", "0"))
+            self.assertEqual(
+                [method for method, _, _ in self.simulator.requests], ["GET"]
+            )
+            self.simulator.project_changed()
+            await self.simulator.publish_values([{"uid": "aaab", "value": 1}])
+            self.assertEqual(deliver.await_count, 2)
+
+    async def test_global_storm_counts_events_before_batching(self) -> None:
+        """500 may deliver together; the next event blocks all UIDs until restart."""
+        self.simulator.clock = Mock(return_value=0)
+        self.simulator.callbacks = {
+            "valueCallback": "https://demo/value",
+            "batchEvents": True,
+        }
+        burst = [{"uid": str(n % 20), "value": n % 2} for n in range(500)]
+        with patch.object(
+            self.simulator, "_deliver", new_callable=AsyncMock
+        ) as deliver:
+            await self.simulator.publish_values(burst)
+            self.assertEqual(len(deliver.await_args.args[0]), 500)
+            await self.simulator.publish_values([{"uid": "other", "value": 1}])
+            self.simulator.clock.return_value = 10
+            self.simulator.project_changed()
+            await self.simulator.publish_values(burst[:1])
+            deliver.assert_awaited_once()
+            self.simulator.restart()
+            await self.simulator.publish_values(burst[:1])
+            self.assertEqual(deliver.await_count, 2)
+
+    async def test_window_expires_and_v2_delivers_individually(self) -> None:
+        """Old events fall out of the sliding window and v2 has no storm limits."""
+        self.simulator.clock = Mock(return_value=0)
+        self.simulator.callbacks = {"valueCallback": "https://demo/value"}
+        events = [{"uid": "aaab", "value": n % 2} for n in range(50)]
+        with patch.object(
+            self.simulator, "_deliver", new_callable=AsyncMock
+        ) as deliver:
+            await self.simulator.publish_values(events)
+            self.simulator.clock.return_value = 5
+            await self.simulator.publish_values(events)
+            self.assertEqual(deliver.await_count, 100)
+            self.simulator.version = "v2"
+            await self.simulator.publish_values(events)
+            self.assertEqual(deliver.await_count, 150)
+
+    async def test_switch_and_dimmer_command_trace(self) -> None:
+        """One on, off and brightness request produce exactly three point events."""
+        await self.client.register_client("urn:homeassistant:test")
+        await self.client.register_callbacks(
+            "https://demo/service", "https://demo/value"
+        )
+        function = (await self.client.get_ui_config())["functions"][0]
+        switch = GiraSwitch(Mock(entry_id="test-entry"), self.client, function, "hub")
+        function["dataPoints"].append(
+            {"name": "Brightness", "uid": "aaac", "canWrite": True}
+        )
+        light = GiraLight(Mock(entry_id="test-entry"), self.client, function, "hub")
+        self.simulator.values["aaac"] = "0"
+        self.simulator.requests.clear()
+        with patch.object(
+            self.simulator, "_deliver", new_callable=AsyncMock
+        ) as deliver:
+            await switch.async_turn_on()
+            await switch.async_turn_off()
+            await light.async_turn_on(brightness=128)
+            self.assertEqual(
+                [call.args[0] for call in deliver.await_args_list],
+                [
+                    [{"uid": "aaab", "value": "1"}],
+                    [{"uid": "aaab", "value": "0"}],
+                    [{"uid": "aaac", "value": "50"}],
+                ],
+            )
+            self.assertEqual(
+                [method for method, _, _ in self.simulator.requests], ["PUT"] * 3
+            )
 
     async def test_initial_state_reads_datapoints_when_function_reads_are_unsupported(
         self,
@@ -323,7 +431,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         self.assertTrue(iscoroutinefunction(scheduled_action))
         self.assertEqual(timer.call_args.args[2], timedelta(minutes=5))
         entry.async_on_unload.assert_any_call(cancel)
-        self.simulator.value = "1"
+        self.simulator.values["aaab"] = "1"
         with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
             await scheduled_action(datetime.now(UTC))
             await self.hass.async_block_till_done()
