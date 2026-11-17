@@ -86,7 +86,7 @@ class GiraSwitch(GiraOneEntity, SwitchEntity):
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial state of the switch."""
         try:
-            data = await self._api.get_value(self.unique_id)
+            data = await self._api.get_function_values(self._function_data)
             if data and "values" in data:
                 for dp_value_info in data["values"]:
                     self._update_state_from_dp_value(

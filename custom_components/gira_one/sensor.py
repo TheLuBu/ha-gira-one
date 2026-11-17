@@ -149,7 +149,7 @@ class GiraTemperatureSensor(SensorEntity):
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial value of the temperature data point."""
         try:
-            data = await self._api.get_value(self._function_uid)
+            data = await self._api.get_value(self._dp_uid)
         except GiraApiClientError as err:
             _LOGGER.debug(
                 "Error fetching initial state for sensor %s: %s",

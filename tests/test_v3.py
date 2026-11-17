@@ -4,10 +4,13 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutinefunction
 from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+
 import tests.test_baseline as baseline
 from custom_components.gira_one import _async_refresh_states, async_setup_entry
 from custom_components.gira_one.api import GiraApiAuthError, GiraApiRequestError
 from custom_components.gira_one.const import DATA_API_CLIENT, DATA_UI_CONFIG, DOMAIN
+from custom_components.gira_one.switch import GiraSwitch
 from dev.mock_gira import TOKEN
 
 
@@ -132,13 +135,34 @@ class GiraV3Tests(baseline.GiraBaselineTests):
             }
         }
         self.simulator.value = "1"
+        self.simulator.reject_function_reads = True
         self.simulator.requests.clear()
         with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
             await _async_refresh_states(self.hass, "test-entry", self.client)
             self.assertEqual(dispatch.call_args.args[-2:], ("aaab", "1"))
         self.assertEqual(
             [(method, path) for method, path, _ in self.simulator.requests],
-            [("GET", "/api/v3/values/aaaa")],
+            [("GET", "/api/v3/values/aaab")],
+        )
+
+    async def test_initial_state_reads_datapoints_when_function_reads_are_unsupported(
+        self,
+    ) -> None:
+        """Actual firmware can reject a function UID while exposing readable DPs."""
+        await self.client.register_client("urn:homeassistant:test")
+        config = await self.client.get_ui_config()
+        function = config["functions"][0]
+        function["dataPoints"].append(
+            {"uid": "command", "name": "Command", "canRead": False}
+        )
+        self.simulator.reject_function_reads = True
+        self.simulator.requests.clear()
+        entity = GiraSwitch(Mock(entry_id="test-entry"), self.client, function, "hub")
+        await entity._fetch_initial_state()
+        self.assertIs(entity.is_on, False)
+        self.assertEqual(
+            [(method, path) for method, path, _ in self.simulator.requests],
+            [("GET", "/api/v3/values/aaab")],
         )
 
     async def test_debug_logs_do_not_contain_access_token(self) -> None:
@@ -198,6 +222,11 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
             await scheduled_action(datetime.now(UTC))
             self.assertEqual(dispatch.call_args.args[-2:], ("aaab", "1"))
+        self.simulator.callbacks = {"serviceCallback": "https://homeassistant/service"}
+        self.hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+        await self.hass.async_block_till_done()
+        self.assertFalse(self.simulator.callbacks)
+        self.assertTrue(self.simulator.registered)
 
     async def test_reconciliation_stops_on_rate_limit(self) -> None:
         """A failed refresh must not continue querying the remaining functions."""

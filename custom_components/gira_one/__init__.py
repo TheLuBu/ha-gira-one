@@ -12,7 +12,7 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -185,13 +185,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         )
 
-    # Ensure the Gira client is cleanly unregistered when HA shuts down
+    async def _async_stop(_event: Event) -> None:
+        await _async_cleanup_resources(hass, entry)
+
+    # Remove callbacks on shutdown while preserving this test/client's token.
     entry.async_on_unload(
         hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STOP,
-            lambda _event: hass.async_create_task(
-                _async_cleanup_resources(hass, entry)
-            ),
+            _async_stop,
         )
     )
 
@@ -211,7 +212,7 @@ async def _async_refresh_states(
                 continue
             if not any(dp.get("canRead") for dp in function.get("dataPoints", [])):
                 continue
-            data = await api_client.get_value(function["uid"])
+            data = await api_client.get_function_values(function)
             for datapoint in data.get("values", []):
                 async_dispatcher_send(
                     hass,

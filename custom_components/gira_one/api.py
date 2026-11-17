@@ -266,6 +266,16 @@ class GiraApiClient:
         status, data = await self._request("GET", f"/{self._api_version}/values/{uid}")
         return data
 
+    async def get_function_values(self, function: dict[str, Any]) -> dict[str, Any]:
+        """Read individual readable DPs; some firmware rejects function-UID reads."""
+        values = []
+        for datapoint in function.get("dataPoints", []):
+            if not datapoint.get("canRead"):
+                continue
+            data = await self.get_value(datapoint["uid"])
+            values.extend(data.get("values", []))
+        return {"values": values}
+
     async def set_value(self, uid: str, value: Any) -> bool:
         """Set a single value for a data point UID."""
         payload = {"value": value}

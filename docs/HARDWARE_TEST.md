@@ -77,6 +77,13 @@ against recurrence; the real container-to-device probe is the regression check.
 
 ## Test sequence
 
+The integration accepts explicitly configured HTTPS origins with a LAN IP when
+HA serves native TLS; loopback/unspecified addresses are rejected. Callback
+registration completes before entity platforms load, so a failed registration
+can retry cleanly. Firmware that rejects function-UID value reads is supported
+by reading each data point marked `canRead` individually. Shutdown cleanup runs
+as an async HA event listener and preserves the dedicated client's token.
+
 - First verify **Using Gira IoT REST API v3**, discovery and initial states.
 - Operate one physical switch. Require a prompt callback update, rather than a
   change appearing only at the five-minute reconciliation interval.

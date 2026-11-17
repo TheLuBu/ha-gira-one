@@ -30,6 +30,7 @@ class GiraSimulator:
         self.requests: list[tuple[str, str, dict]] = []
         self.error_status: int | None = None
         self.error_code = "generic"
+        self.reject_function_reads = False
         self.app = web.Application()
         self.app.router.add_route("*", "/api/{version}", self.handle)
         self.app.router.add_route("*", "/api/{version}/{tail:.*}", self.handle)
@@ -89,6 +90,8 @@ class GiraSimulator:
             return web.json_response(self.ui_config(version))
         if path.startswith("values/"):
             uid = path.split("/")[-1]
+            if uid == "aaaa" and request.method == "GET" and self.reject_function_reads:
+                return self.error(422, "unprocessable")
             if uid not in ("aaaa", "aaab"):
                 return self.error(401, "invalidAuth")
             if request.method == "PUT":
