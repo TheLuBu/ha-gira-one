@@ -45,6 +45,19 @@ Behind the scenes, the following Gira function types are mapped automatically:
 - `de.gira.schema.functions.KNX.FanCoil` → Climate
 - `de.gira.schema.functions.SaunaHeating` → Climate
 
+### Gira icons
+
+Switches with a radiator (11), plug (15) or musical note (72) use corresponding
+on/off icons in Home Assistant. Scenes also recognize the crescent moon (3),
+star (4) and heart (76). These are entity defaults and HA icon customizations
+take precedence. Other IDs, including `-1`, and v2 entries without an icon
+use the platform defaults. Covers, lights and climate entities retain HA's
+state-aware presentation. Location names suggest HA areas. Gira trade and
+location icons are project metadata, while HA areas are user-managed and may
+be shared by multiple integrations.
+
+The numbers come from the [GPA project interface pictogram table, page 15](https://partner.gira.com/data3/GPA-Projektschnittstelle_Dokumentation.pdf#page=15).
+
 ### Scene discovery
 
 `FunctionScene` and legacy `SceneSet` recall through `Execute`. Legacy

@@ -47,7 +47,9 @@ class SceneTests(unittest.IsolatedAsyncioTestCase):
             {"number": 128, "name": "Invalid"},
             None,
         ]
+        fn["iconID"] = 76
         first, second = await self.discover(fn)
+        self.assertEqual(first.icon, "mdi:heart-outline")
         self.assertEqual(first.name, second.name)
         self.assertEqual(
             [first.unique_id, second.unique_id], ["bbbb_scene_2", "bbbb_scene_4"]

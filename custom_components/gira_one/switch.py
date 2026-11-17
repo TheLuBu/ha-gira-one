@@ -19,6 +19,7 @@ from .const import (
     SWITCH,
 )
 from .entity import GiraOneEntity
+from .icons import SWITCH_ICONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +83,15 @@ class GiraSwitch(GiraOneEntity, SwitchEntity):
             config_entry, api_client, function_data, hub_device_id, suggested_area
         )
         self._attr_is_on = None
+        icon_id = function_data.get("iconID")
+        self._icons = SWITCH_ICONS.get(icon_id) if type(icon_id) is int else None
+
+    @property
+    def icon(self) -> str | None:
+        """Use the chosen GPA pictogram once the switch state is known."""
+        if self._icons is None or self.is_on is None:
+            return None
+        return self._icons[1 if self.is_on else 0]
 
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial state of the switch."""

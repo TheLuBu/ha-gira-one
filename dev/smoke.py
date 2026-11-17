@@ -101,6 +101,29 @@ async def smoke() -> None:
             json={"entity_id": min(scenes)},
         ) as response:
             response.raise_for_status()
+        # Customize the switch in HA's own entity registry before reloading Gira.
+        async with session.ws_connect(f"{BASE_URL}/api/websocket") as ws:
+            await ws.receive_json()
+            await ws.send_json(
+                {
+                    "type": "auth",
+                    "access_token": session.headers["Authorization"].removeprefix(
+                        "Bearer "
+                    ),
+                }
+            )
+            if (await ws.receive_json())["type"] != "auth_ok":
+                raise RuntimeError("Development websocket login failed")
+            await ws.send_json(
+                {
+                    "id": 1,
+                    "type": "config/entity_registry/update",
+                    "entity_id": entity_id,
+                    "icon": "mdi:pine-tree",
+                }
+            )
+            if not (await ws.receive_json())["success"]:
+                raise RuntimeError("Could not customize switch icon")
         async with session.post(
             f"{BASE_URL}/api/config/config_entries/entry/{result['result']['entry_id']}/reload"
         ) as response:
@@ -121,6 +144,7 @@ async def smoke() -> None:
             len(switches) != 1
             or switches[0]["entity_id"] != entity_id
             or switches[0]["state"] != "off"
+            or switches[0]["attributes"].get("icon") != "mdi:pine-tree"
         ):
             raise RuntimeError(
                 "Reload changed the switch identity or failed to restore its state"

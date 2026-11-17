@@ -17,6 +17,7 @@ from .const import (
     DATA_UI_CONFIG,
     DOMAIN,
 )
+from .icons import SCENE_ICONS
 
 _RECALL_POINTS = {
     (
@@ -109,6 +110,9 @@ class GiraScene(Scene):
         self._point_uid = point_uid
         self._number = number
         self._attr_name = name
+        icon_id = function.get("iconID")
+        if type(icon_id) is int and icon_id in SCENE_ICONS:
+            self._attr_icon = SCENE_ICONS[icon_id]
         self._attr_unique_id = f"{function['uid']}_scene_{number}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, function["uid"])},
