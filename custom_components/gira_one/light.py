@@ -196,13 +196,14 @@ class GiraLight(GiraOneEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
         payloads = []
+        has_brightness = ATTR_BRIGHTNESS in kwargs and self._has_dp(DP_BRIGHTNESS)
 
-        # Always send ON command
-        if self._has_dp(DP_ON_OFF):
+        # Re-sending ON while dimming can recall the actuator's switch-on brightness.
+        if self._has_dp(DP_ON_OFF) and not (has_brightness and self.is_on):
             payloads.append({"uid": self._get_dp_uid(DP_ON_OFF), "value": 1})
 
         # Brightness
-        if ATTR_BRIGHTNESS in kwargs and self._has_dp(DP_BRIGHTNESS):
+        if has_brightness:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             gira_brightness = round((ha_brightness / 255) * 100)
             payloads.append(

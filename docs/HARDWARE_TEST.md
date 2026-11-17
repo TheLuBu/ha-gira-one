@@ -94,6 +94,20 @@ as an async HA event listener and preserves the dedicated client's token.
   a GPA project just to exercise a test case.
 - Keep rate-limit/event-storm fault injection in the simulator.
 
+### Dimming feedback
+
+On the tested Gira One firmware 4.0.465.0, sending `OnOff=1` produces 100%
+brightness feedback even if the light is already on. Previously every HA brightness
+change included that switch command, causing callbacks for the requested value,
+then 100%, then the final actuator value about 2–5 seconds later.
+
+For an already-on light, brightness changes now send only `Brightness`. Hardware
+checks on both kitchen dimmers (100 → 25 → 75 → 25%) returned the target and final
+quantized values without the 100% excursion. Off or unknown lights retain the
+explicit switch-on; plain ON commands and genuine 100% callbacks remain intact.
+When repeating this check, compare incoming callbacks as well as the final UI
+value, and restore the lights' initial state afterward.
+
 View this test container's logs:
 
 ```sh
