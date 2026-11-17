@@ -177,7 +177,7 @@ class GiraLight(GiraOneEntity, LightEntity):
                             changed = True
                     elif dp_name == DP_BRIGHTNESS:
                         # Gira 0-100 -> HA 0-255
-                        brightness = int(float(value) * 2.55)
+                        brightness = round(float(value) * 255 / 100)
                         if self._attr_brightness != brightness:
                             self._attr_brightness = brightness
                             changed = True
