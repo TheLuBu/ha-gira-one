@@ -39,6 +39,42 @@ route to the configured address and complete a TLS connection. If it rejects the
 test certificate, use an appropriately trusted certificate/hostname for this test
 instance and configure its HTTP settings accordingly.
 
+## Docker route overlaps the real LAN
+
+If Windows can read the real Gira API but the same request times out inside the
+test container, inspect the Docker VM's route. A pre-existing Docker bridge may
+cover the physical LAN even though this project's own subnet does not overlap it:
+
+```powershell
+$giraIp = '192.168.178.10'  # Replace with your actual Gira server's address.
+docker run --rm --network host --entrypoint ip ha-gira-dev-hardware route get $giraIp
+docker run --rm --network host --entrypoint ip ha-gira-dev-hardware route
+```
+
+In the observed case, Docker sent the Gira IP to a bridge for `192.168.176.0/20`;
+the VM's external default gateway was `192.168.65.1` on `eth0`. Confirm the current
+gateway and that the exact destination IP is not used by a Docker container before
+adding a host-specific route. For that verified layout:
+
+```powershell
+docker run --rm --user 0:0 --cap-add NET_ADMIN --network host --entrypoint ip ha-gira-dev-hardware route add "$giraIp/32" via 192.168.65.1 dev eth0
+docker run --rm --network host --entrypoint ip ha-gira-dev-hardware route get $giraIp
+```
+
+This modifies routing for only that destination in the Docker VM. It does not
+remove or recreate another project's network, change Gira configuration or modify
+the production HA instance. The capability is needed only by this one-shot route
+command; the HA test container continues running without it. Do not replace an
+existing host-specific route blindly. The route survives test-container restarts
+but may disappear when Docker Desktop/its VM restarts; check it before a later
+test session. Its inverse is the same command with `route del "$giraIp/32"`.
+
+The original integration availability probe timed out twice before this route
+change and returned `GDS-REST-API`, version `3`, twice afterward. No credentials,
+client registration or device commands were needed for that diagnosis. This is
+a host-network prerequisite, so an isolated application unit test cannot guard
+against recurrence; the real container-to-device probe is the regression check.
+
 ## Test sequence
 
 - First verify **Using Gira IoT REST API v3**, discovery and initial states.
