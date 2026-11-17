@@ -1,5 +1,6 @@
 """Verify v3 negotiation, backwards compatibility and failure behavior over HTTPS."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutinefunction
 from unittest.mock import AsyncMock, Mock, patch
@@ -7,7 +8,13 @@ from unittest.mock import AsyncMock, Mock, patch
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 
 import tests.test_baseline as baseline
-from custom_components.gira_one import _async_refresh_states, async_setup_entry
+from custom_components.gira_one import (
+    GiraServiceCallbackView,
+    GiraValueCallbackView,
+    _async_refresh_states,
+    _StateRefresh,
+    async_setup_entry,
+)
 from custom_components.gira_one.api import GiraApiAuthError, GiraApiRequestError
 from custom_components.gira_one.const import DATA_API_CLIENT, DATA_UI_CONFIG, DOMAIN
 from custom_components.gira_one.switch import GiraSwitch
@@ -124,6 +131,104 @@ class GiraV3Tests(baseline.GiraBaselineTests):
                     self.assertEqual(response.status, status)
                 dispatch.assert_not_called()
 
+    async def test_delivery_failure_recovers_state_for_only_reporting_entry(
+        self,
+    ) -> None:
+        """Authenticate both routes and preserve ordinary events alongside failures."""
+        await self.client.register_client("urn:homeassistant:test")
+        config = await self.client.get_ui_config()
+        self.simulator.value = "1"
+        for view_type, events in (
+            (GiraServiceCallbackView, []),
+            (GiraValueCallbackView, [{"uid": "aaab", "value": "0"}]),
+        ):
+            entry_id = "reporting"
+            refresh = _StateRefresh(self.hass, entry_id, self.client)
+            other_refresh = Mock()
+            self.hass.data[DOMAIN] = {
+                entry_id: {
+                    DATA_API_CLIENT: self.client,
+                    DATA_UI_CONFIG: config,
+                    "refresh": refresh,
+                },
+                "other": {"refresh": other_refresh},
+            }
+            view = view_type(self.hass, entry_id)
+            request = Mock(json=AsyncMock())
+            self.simulator.requests.clear()
+            with (
+                self.subTest(view=view_type),
+                patch("custom_components.gira_one.async_dispatcher_send") as dispatch,
+            ):
+                for fields in (
+                    {},
+                    {"failures": 0},
+                    {"failures": -1},
+                    {"failures": "broken"},
+                    {"failures": True},
+                    {"failures": None},
+                ):
+                    request.json.return_value = {"token": TOKEN, "events": [], **fields}
+                    self.assertEqual((await view.post(request)).status, 200)
+                request.json.return_value = {
+                    "token": "wrong",
+                    "failures": 4,
+                    "events": [],
+                }
+                self.assertEqual((await view.post(request)).status, 404)
+                self.assertIsNone(refresh.task)
+                request.json.return_value = {
+                    "token": TOKEN,
+                    "failures": "2" if events else 2,
+                    "events": events,
+                }
+                self.assertEqual((await view.post(request)).status, 200)
+                await self.hass.async_block_till_done()
+                self.assertEqual(
+                    [call.args[-1] for call in dispatch.call_args_list],
+                    ["0", "1"] if events else ["1"],
+                )
+                self.assertTrue(
+                    all(
+                        call.args[1].endswith("_reporting")
+                        for call in dispatch.call_args_list
+                    )
+                )
+                self.assertEqual(
+                    [(method, path) for method, path, _ in self.simulator.requests],
+                    [("GET", "/api/v3/values/aaab")],
+                )
+                other_refresh.request.assert_not_called()
+
+    async def test_overlapping_failures_and_unload(self) -> None:
+        """One follow-up covers losses mid-read; unload cancels that read."""
+        refresh = _StateRefresh(self.hass, "test-entry", self.client)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        second = asyncio.Event()
+
+        async def read(*_args: object) -> None:
+            if started.is_set():
+                second.set()
+                await asyncio.Event().wait()
+            started.set()
+            await release.wait()
+
+        with patch(
+            "custom_components.gira_one._async_refresh_states", side_effect=read
+        ) as reads:
+            refresh.request()
+            await started.wait()
+            for _ in range(10):
+                refresh.request()
+            self.assertEqual(reads.await_count, 1)
+            release.set()
+            await second.wait()
+            await refresh.stop()
+            refresh.request()
+            self.assertTrue(refresh.task.cancelled())
+            self.assertEqual(reads.await_count, 2)
+
     async def test_read_only_reconciliation_recovers_a_missed_event(self) -> None:
         """Periodic reconciliation obtains current states even without callbacks."""
         await self.client.check_api_availability()
@@ -221,6 +326,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         self.simulator.value = "1"
         with patch("custom_components.gira_one.async_dispatcher_send") as dispatch:
             await scheduled_action(datetime.now(UTC))
+            await self.hass.async_block_till_done()
             self.assertEqual(dispatch.call_args.args[-2:], ("aaab", "1"))
         self.simulator.callbacks = {"serviceCallback": "https://homeassistant/service"}
         self.hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)

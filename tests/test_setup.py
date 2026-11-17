@@ -45,8 +45,8 @@ class CallbackSetupTests(unittest.IsolatedAsyncioTestCase):
                 await _async_register_callbacks(self.hass, self.entry, self.api)
             )
         self.api.register_callbacks.assert_awaited_once_with(
-            "https://192.0.2.20:18124/api/gira_one/service_callback",
-            "https://192.0.2.20:18124/api/gira_one/value_callback",
+            "https://192.0.2.20:18124/api/gira_one/service_callback/test-entry",
+            "https://192.0.2.20:18124/api/gira_one/value_callback/test-entry",
         )
 
     async def test_loopback_callback_origin_is_rejected(self) -> None:

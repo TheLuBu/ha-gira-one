@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import suppress
 from datetime import datetime, timedelta
 from ipaddress import ip_address
 from typing import Any
@@ -152,7 +154,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 'via_device_id', so register it first and keep its registry id around.
     hub_device_id = await _async_register_device(hass, entry, api_client)
 
+    refresh = _StateRefresh(hass, entry.entry_id, api_client)
     hass.data[DOMAIN][entry.entry_id] = {
+        "refresh": refresh,
         DATA_API_CLIENT: api_client,
         DATA_UI_CONFIG: ui_config,
         DATA_LOCATION_MAP: location_map,
@@ -161,6 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register callback views with HA and callback URLs with the Gira device
     if not await _async_register_callbacks(hass, entry, api_client):
+        await refresh.stop()
         hass.data[DOMAIN].pop(entry.entry_id, None)
         raise ConfigEntryNotReady(
             "Could not register Gira One callback URLs. Ensure Home Assistant "
@@ -174,7 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if api_client.api_version == API_VERSION:
 
         async def _refresh_states(_now: datetime) -> None:
-            await _async_refresh_states(hass, entry.entry_id, api_client)
+            refresh.request()
 
         # v3 may suppress callbacks after an event storm without notifying clients.
         entry.async_on_unload(
@@ -197,6 +202,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     return True
+
+
+class _StateRefresh:
+    """Serialize interval and delivery-failure reads for one loaded entry."""
+
+    def __init__(
+        self, hass: HomeAssistant, entry_id: str, client: GiraApiClient
+    ) -> None:
+        self.hass = hass
+        self.entry_id = entry_id
+        self.client = client
+        self.task: asyncio.Task | None = None
+        self.pending = False
+        self.stopped = False
+
+    @callback
+    def request(self) -> None:
+        """Coalesce requests, retaining failures received after a pass started."""
+        if self.stopped:
+            return
+        self.pending = True
+        if self.task is None or self.task.done():
+            self.task = self.hass.async_create_task(self._run())
+
+    async def _run(self) -> None:
+        while self.pending:
+            self.pending = False
+            await _async_refresh_states(self.hass, self.entry_id, self.client)
+
+    async def stop(self) -> None:
+        """Reject further requests and finish cancellation before cleanup."""
+        self.stopped = True
+        if self.task and not self.task.done():
+            self.task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.task
 
 
 async def _async_refresh_states(
@@ -313,8 +354,8 @@ async def _async_register_callbacks(
         )
         return False
 
-    service_callback_url = f"{base_url}{SERVICE_CALLBACK_PATH}"
-    value_callback_url = f"{base_url}{VALUE_CALLBACK_PATH}"
+    service_callback_url = f"{base_url}{SERVICE_CALLBACK_PATH}/{entry.entry_id}"
+    value_callback_url = f"{base_url}{VALUE_CALLBACK_PATH}/{entry.entry_id}"
 
     _LOGGER.info("Registering Gira service callback URL: %s", service_callback_url)
     _LOGGER.info("Registering Gira value callback URL: %s", value_callback_url)
@@ -352,6 +393,8 @@ async def _async_cleanup_resources(
     api_client: GiraApiClient | None = entry_data.get(DATA_API_CLIENT)
     if api_client is None:
         return
+
+    await entry_data["refresh"].stop()
 
     # Prevent re-auth loop during cleanup
     api_client.disable_auth_error_callback()
@@ -415,6 +458,8 @@ class BaseGiraCallbackView(HomeAssistantView):
         """Initialize the callback view."""
         self.hass = hass
         self.entry_id = entry_id
+        self.url = f"{self.url}/{entry_id}"
+        self.name = f"{self.name}:entry_{entry_id}"
 
     async def post(self, request: web.Request) -> web.Response:
         """Handle POST requests from the Gira API."""
@@ -449,6 +494,21 @@ class BaseGiraCallbackView(HomeAssistantView):
         ):
             return self.json_message("Invalid events", status_code=400)
         await self.process_events(events, api_client)
+        failures = data.get("failures", 0)
+        # Firmware may encode this counter as a JSON number or a decimal string.
+        if isinstance(failures, str) and failures.isascii() and failures.isdecimal():
+            failures = failures.lstrip("0") or "0"
+            if len(failures) < 20:
+                failures = int(failures)
+        if type(failures) is not int or failures < 0:
+            _LOGGER.debug("Ignoring invalid Gira callback failure count")
+        elif failures:
+            _LOGGER.warning(
+                "Gira reported %d failed callback deliveries for %s",
+                failures,
+                self.entry_id,
+            )
+            self.hass.data[DOMAIN][self.entry_id]["refresh"].request()
         return self.json({}, status_code=200)
 
     async def process_events(self, events: list, api_client: GiraApiClient) -> None:
