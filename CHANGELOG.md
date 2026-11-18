@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0-beta.2](https://github.com/TheLuBu/ha-gira-one/compare/v1.1.0-beta.1...v1.1.0-beta.2) (2026-11-18)
+
+
+### Features
+
+* show the detected callback URL and allow a per-entry override ([3c04e47](https://github.com/TheLuBu/ha-gira-one/commit/3c04e47123179ee04e417eb9a0abc8804c414363))
+
+
+### Bug Fixes
+
+* keep callback examples in the setup documentation ([9825b29](https://github.com/TheLuBu/ha-gira-one/commit/9825b290423cf84a1bcbaaee1648ed5e883f3bd9))
+
 ## [1.1.0-beta.1](https://github.com/TheLuBu/ha-gira-one/compare/v1.0.5...v1.1.0-beta.1) (2026-11-18)
 
 
