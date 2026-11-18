@@ -384,7 +384,8 @@ class GiraV3Tests(baseline.GiraBaselineTests):
             ),
             patch("custom_components.gira_one._async_cleanup_stale_devices"),
             patch(
-                "custom_components.gira_one.get_url", return_value="https://ha.example"
+                "custom_components.gira_one.callback_url.get_url",
+                return_value="https://ha.example",
             ),
             patch.object(self.client, "register_callbacks", side_effect=probe),
             patch.object(self.hass, "http", create=True) as http,

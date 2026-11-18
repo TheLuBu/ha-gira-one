@@ -18,9 +18,12 @@ from .api import (
     GiraApiConnectionError,
     GiraApiRequestError,
 )
-from .const import CLIENT_URN_PREFIX, DOMAIN
+from .callback_url import detect_callback_url, normalize_callback_url
+from .const import CLIENT_URN_PREFIX, CONF_CALLBACK_URL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+CALLBACK_SCHEMA = vol.Schema({vol.Optional(CONF_CALLBACK_URL): str})
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -28,7 +31,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
     }
-)
+).extend(CALLBACK_SCHEMA.schema)
 
 STEP_REAUTH_DATA_SCHEMA = vol.Schema(
     {
@@ -36,6 +39,21 @@ STEP_REAUTH_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): str,
     }
 )
+
+
+def _callback_input(
+    user_input: dict[str, Any], detected: str | None, errors: dict[str, str]
+) -> str | None:
+    """Normalize a manual override or require a usable automatic address."""
+    raw = user_input.get(CONF_CALLBACK_URL, "").strip()
+    if raw:
+        override = normalize_callback_url(raw)
+        if not override:
+            errors[CONF_CALLBACK_URL] = "invalid_callback_url"
+        return override
+    if not detected:
+        errors[CONF_CALLBACK_URL] = "callback_url_required"
+    return None
 
 
 async def _async_validate_input(
@@ -101,7 +119,10 @@ class GiraOneConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         """Handle the initial user step."""
         errors: dict[str, str] = {}
 
+        detected = detect_callback_url(self.hass)
         if user_input is not None:
+            override = _callback_input(user_input, detected, errors)
+        if user_input is not None and not errors:
             try:
                 validated = await _async_validate_input(self.hass, user_input)
             except GiraApiAuthError:
@@ -127,7 +148,10 @@ class GiraOneConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=validated["title"],
                     data={
-                        **user_input,
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_USERNAME: user_input[CONF_USERNAME],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        **({CONF_CALLBACK_URL: override} if override else {}),
                         "client_id": validated["client_id"],
                         "access_token": validated["access_token"],
                     },
@@ -135,7 +159,40 @@ class GiraOneConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA,
+                {
+                    key: value
+                    for key, value in (user_input or {}).items()
+                    if key != CONF_PASSWORD
+                },
+            ),
+            description_placeholders={"detected_url": detected or "-"},
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the callback origin without registering a new Gira client."""
+        entry = self._get_reconfigure_entry()
+        detected = detect_callback_url(self.hass)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            override = _callback_input(user_input, detected, errors)
+            if not errors:
+                data = dict(entry.data)
+                if override:
+                    data[CONF_CALLBACK_URL] = override
+                else:
+                    data.pop(CONF_CALLBACK_URL, None)
+                return self.async_update_reload_and_abort(entry, data=data)
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                CALLBACK_SCHEMA, entry.data if user_input is None else user_input
+            ),
+            description_placeholders={"detected_url": detected or "-"},
             errors=errors,
         )
 

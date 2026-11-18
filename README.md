@@ -9,7 +9,7 @@ This integration connects Home Assistant to a **Gira One Server** via its local 
 It exposes lights, covers, and room thermostats as native Home Assistant entities and receives real-time status updates via callbacks (Local Push), so state changes made at the physical switch or in the Gira app are immediately reflected in Home Assistant.
 
 > [!IMPORTANT]
-> **Home Assistant must be reachable from the Gira One Server via an HTTPS URL.** The Gira One Server pushes state updates back to Home Assistant via HTTP callbacks and explicitly rejects non-HTTPS targets. Either an *internal* or an *external* URL works, as long as it uses `https://` and the Gira Server can reach it on the network. The integration will refuse to set up if no HTTPS URL is configured.
+> **Home Assistant must be reachable from the Gira One Server via an HTTPS URL.** The Gira One Server pushes state updates back to Home Assistant via HTTP callbacks and explicitly rejects non-HTTPS targets. Either an *internal* or an *external* URL works, as long as it uses `https://` and the Gira Server can reach it on the network. Setup shows the detected address and lets you enter an HTTPS callback base URL for this Gira server.
 
 ## API v3 compatibility
 
@@ -108,14 +108,15 @@ After installation, add the integration via the UI:
 3. Enter:
    - **Host**: IP address or hostname of your Gira One Server.
    - **Username** / **Password**: A Gira One user account with sufficient permissions.
-4. Submit.
+4. Check the detected Home Assistant HTTPS address. Leave **Manual callback base URL** empty to follow Home Assistant's URL selection, or enter the HTTPS origin reachable from Gira (for example, `https://ha.example.org:8123`). The integration appends both callback paths.
+5. Submit. Gira tests the callback connection during registration.
 
 Compatible devices will be added automatically and grouped by room (using the Gira project's location names as suggested areas).
 
 ## Troubleshooting
 
 **Setup fails with "Cannot determine an HTTPS URL".**
-Home Assistant has neither an internal nor external HTTPS URL configured. Set one under *Settings → System → Network → Home Assistant URL* and make sure it uses `https://`. A local HTTPS URL is fine as long as the Gira One Server can reach it and accepts the TLS certificate (self-signed certificates may be rejected — use a private CA or a trusted certificate in that case).
+For an existing Gira One entry, open its menu under **Settings → Devices & services** and select **Reconfigure**. Enter a reachable HTTPS base URL, or clear the override to resume automatic selection. Home Assistant must already serve HTTPS directly or through a reachable reverse proxy.
 
 **Setup fails with "invalid_auth".**
 Double-check the Gira One username and password. Note that some Gira user roles cannot register new API clients.

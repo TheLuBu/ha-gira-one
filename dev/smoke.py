@@ -54,6 +54,8 @@ async def smoke() -> None:
         ) as response:
             response.raise_for_status()
             flow = await response.json()
+            if flow.get("description_placeholders", {}).get("detected_url") != BASE_URL:
+                raise RuntimeError("Setup did not show the demo HTTPS callback origin")
         async with session.post(
             f"{BASE_URL}/api/config/config_entries/flow/{flow['flow_id']}",
             json={"host": "gira:8443", "username": USERNAME, "password": PASSWORD},
@@ -152,6 +154,28 @@ async def smoke() -> None:
         print(
             "PASS: unload/reload preserves the existing entity and reads its current state"
         )
+
+        # Exercise the same Reconfigure action offered for a setup-retry entry.
+        async with session.post(
+            f"{BASE_URL}/api/config/config_entries/flow",
+            json={"handler": "gira_one", "entry_id": result["result"]["entry_id"]},
+        ) as response:
+            response.raise_for_status()
+            form = await response.json()
+        if (
+            form.get("step_id") != "reconfigure"
+            or form["description_placeholders"]["detected_url"] != BASE_URL
+        ):
+            raise RuntimeError("Reconfigure did not show the detected HTTPS address")
+        async with session.post(
+            f"{BASE_URL}/api/config/config_entries/flow/{form['flow_id']}",
+            json={"callback_url": BASE_URL + "/"},
+        ) as response:
+            response.raise_for_status()
+            saved = await response.json()
+        if saved.get("reason") != "reconfigure_successful":
+            raise RuntimeError("The callback URL override was not saved")
+        print("PASS: the existing entry accepts a manual callback URL")
 
 
 if __name__ == "__main__":

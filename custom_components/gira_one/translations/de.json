@@ -6,7 +6,12 @@
         "data": {
           "host": "Server IP Adresse",
           "username": "Benutzername",
-          "password": "Passwort"
+          "password": "Passwort",
+          "callback_url": "Manuelle Callback-Basisadresse"
+        },
+        "description": "Automatisch ermittelte HTTPS-Adresse: **{detected_url}**. Ein Strich bedeutet, dass keine Adresse gefunden wurde.",
+        "data_description": {
+          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben, z. B. https://ha.example.org:8123. Die Callback-Pfade werden automatisch ergänzt."
         }
       },
       "reauth_confirm": {
@@ -16,6 +21,16 @@
           "username": "Benutzername",
           "password": "Passwort"
         }
+      },
+      "reconfigure": {
+        "title": "Callback-Adresse ändern",
+        "description": "Automatisch ermittelte HTTPS-Adresse: **{detected_url}**. Ein Strich bedeutet, dass keine Adresse gefunden wurde.",
+        "data": {
+          "callback_url": "Manuelle Callback-Basisadresse"
+        },
+        "data_description": {
+          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben, z. B. https://ha.example.org:8123. Die Callback-Pfade werden automatisch ergänzt."
+        }
       }
     },
     "error": {
@@ -24,7 +39,9 @@
       "registration_failed": "Die Registrierung des Clients beim Gira One Server ist fehlgeschlagen.",
       "device_locked": "Der Gira One Server ist derzeit gesperrt. Versuchen Sie es später erneut.",
       "api_error": "Ein unerwarteter API-Fehler ist aufgetreten.",
-      "unknown": "Ein unbekannter Fehler ist aufgetreten."
+      "unknown": "Ein unbekannter Fehler ist aufgetreten.",
+      "invalid_callback_url": "Gib eine erreichbare HTTPS-Basisadresse mit Host und optionalem Port ein. Entferne Pfad, Zugangsdaten und URL-Parameter.",
+      "callback_url_required": "Keine HTTPS-Adresse gefunden. Gib hier die HTTPS-Basisadresse von Home Assistant ein."
     },
     "abort": {
       "already_configured": "Dieser Gira One Server ist bereits konfiguriert.",
