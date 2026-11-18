@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
@@ -59,6 +60,7 @@ class GiraApiClient:
         self._auth_error_callback = auth_error_callback
         self._api_version = API_VERSION
         self._rate_limit_until = 0.0
+        self.last_success: datetime | None = None
 
     async def _request(
         self,
@@ -180,6 +182,7 @@ class GiraApiClient:
             msg = f"API Error {status_code}: [{error_code}] {error_message}"
             raise GiraApiRequestError(msg, status_code=status_code)
 
+        self.last_success = datetime.now(UTC)
         return status_code, response_data
 
     def set_auth_error_callback(self, callback: Callable[[], None] | None) -> None:
@@ -266,6 +269,12 @@ class GiraApiClient:
         status, data = await self._request("GET", f"/{self._api_version}/values/{uid}")
         return data
 
+    async def get_ui_config_uid(self) -> str | None:
+        """Read the lightweight configuration identifier of this server."""
+        _, data = await self._request("GET", f"/{self._api_version}/uiconfig/uid")
+        uid = data.get("uid")
+        return uid if isinstance(uid, str) and uid else None
+
     async def get_function_values(self, function: dict[str, Any]) -> dict[str, Any]:
         """Read individual readable DPs; some firmware rejects function-UID reads."""
         values = []
@@ -299,7 +308,7 @@ class GiraApiClient:
         payload = {
             "serviceCallback": service_callback_url,
             "valueCallback": value_callback_url,
-            "testCallbacks": False,
+            "testCallbacks": True,
         }
         if self._api_version == API_VERSION:
             payload["batchEvents"] = True

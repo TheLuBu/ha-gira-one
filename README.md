@@ -15,6 +15,8 @@ It exposes lights, covers, and room thermostats as native Home Assistant entitie
 
 - The API version is detected during initial configuration, integration setup/reload and removal. Existing config entries, client IDs and entity unique IDs are preserved.
 - v3 callback registration enables `batchEvents`; every event in a callback batch is processed. v2 registration omits that option.
+- Registration tests both HTTPS callback routes. HA retries setup if the return path is unavailable. After a Gira startup, HA refreshes readable states. UI and project change events trigger a configuration UID check before reloading the entry.
+- Download diagnostics from the integration entry to see the server model, firmware, API version, function counts and time of the last successful request.
 - Gira scenes appear under their function device when the server supplies a scene number and writable recall datapoint. Each activation sends the published number once.
 - v3 can suppress value callbacks after an event storm. A read-only reconciliation every five minutes recovers current states while callbacks are missing. It does not reset the server's protection or recover intermediate events.
 - HTTP 429 starts a five-second request cooldown. Commands are not automatically replayed. Invalid-token responses start reauthentication; access denied to an individual UID does not.
@@ -28,12 +30,14 @@ See the [firmware 4.0 support matrix](docs/FIRMWARE_4_CHANNELS.md) for the chann
 | Platform | Capabilities |
 |---|---|
 | **Button** | Execute the configured Trigger or Trigger2 action |
+| **Binary sensor** | Generic read-only BinaryStatus |
+| **Media player** | Gira Audio and Sonos.Audio playback, volume, optional mute, track navigation and track/playlist metadata. Playlist selection and cover art are outside the current scope. |
 | **Switch** | On/off |
 | **Light** | On/off, brightness (dimming), color temperature (tunable white), RGB/W color |
 | **Cover** | Open, close, stop, set position, set tilt (slat) position — for roller shutters and venetian blinds |
 | **Climate** | Current temperature, target temperature, HVAC mode, preset modes (Comfort, Eco/Night, Away/Standby, Protection) |
 | **Scene** | Activate a numbered Gira scene |
-| **Sensor** | Current and target temperature exposed as dedicated sensor entities per Gira climate function (for graphing and automations) |
+| **Sensor** | Current and target temperature per climate function, plus read-only NumericFloatStatus with a unit when supplied by the project |
 
 ### Supported Gira function types
 

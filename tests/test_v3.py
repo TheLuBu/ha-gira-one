@@ -6,12 +6,14 @@ from inspect import iscoroutinefunction
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.exceptions import ConfigEntryNotReady
 
 import tests.test_baseline as baseline
 from custom_components.gira_one import (
     GiraServiceCallbackView,
     GiraValueCallbackView,
     _async_refresh_states,
+    _ConfigChange,
     _StateRefresh,
     async_setup_entry,
 )
@@ -39,15 +41,21 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         config = await self.client.get_ui_config()
         self.assertEqual(config["functions"][0]["uid"], "aaaa")
         self.assertIn("scenes", config["functions"][1])
-        self.assertTrue(
-            await self.client.register_callbacks(
-                "https://homeassistant/service", "https://homeassistant/value"
-            )
-        )
+        self.assertTrue(await self.register_test_callbacks())
         self.assertIs(self.simulator.callbacks["batchEvents"], True)
         self.assertTrue(
             all(path.startswith("/api/v3/") for _, path, _ in self.simulator.requests)
         )
+
+    async def test_callback_probe_can_retry_after_receiver_becomes_ready(self) -> None:
+        """A failed test leaves no registration; the same client can retry."""
+        await self.client.register_client("urn:homeassistant:test")
+        url = await self.callback_url()
+        with self.assertRaises(GiraApiRequestError):
+            await self.client.register_callbacks(url + "/unavailable", url)
+        self.assertFalse(self.simulator.callbacks)
+        self.assertTrue(await self.register_test_callbacks())
+        self.assertTrue(self.simulator.callbacks["testCallbacks"])
 
     async def test_fallback_to_v2_omits_batch_option(self) -> None:
         """An old device is probed once for v3, then all operations use v2."""
@@ -55,9 +63,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         await self.client.check_api_availability()
         self.assertEqual(self.client.api_version, "v2")
         await self.client.register_client("urn:homeassistant:test")
-        await self.client.register_callbacks(
-            "https://homeassistant/service", "https://homeassistant/value"
-        )
+        await self.register_test_callbacks()
         self.assertNotIn("batchEvents", self.simulator.callbacks)
         self.assertEqual(self.simulator.requests[0][1], "/api/v3/")
         self.assertTrue(
@@ -233,6 +239,174 @@ class GiraV3Tests(baseline.GiraBaselineTests):
                 self.simulator.requests, [("GET", "/api/v3/values/aaab", {})]
             )
 
+    async def test_restart_and_startup_refresh(self) -> None:
+        """Only readiness triggers a read, including when the restart event was missed."""
+        await self.client.register_client("urn:homeassistant:test")
+        service_url = (await self.callback_url()).rsplit("/", 1)[0] + "/service"
+        config = await self.client.get_ui_config()
+        refresh = _StateRefresh(self.hass, "test-entry", self.client)
+        self.hass.data[DOMAIN]["test-entry"].update(
+            {DATA_UI_CONFIG: config, "refresh": refresh}
+        )
+        switch = GiraSwitch(
+            Mock(entry_id="test-entry"), self.client, config["functions"][0], "hub"
+        )
+        switch.hass = self.hass
+
+        async def event(name: str) -> None:
+            async with self.session.post(
+                service_url, json={"token": TOKEN, "events": [{"event": name}]}
+            ) as response:
+                self.assertEqual(response.status, 200)
+            await self.hass.async_block_till_done()
+
+        with (
+            patch.object(switch, "async_on_remove", side_effect=self.addCleanup),
+            patch.object(switch, "async_write_ha_state"),
+        ):
+            await switch.async_added_to_hass()
+            self.simulator.values["aaab"] = "1"
+            self.simulator.requests.clear()
+            await event("restart")
+            refresh.request()
+            await self.hass.async_block_till_done()
+            self.assertFalse(self.simulator.requests)
+            self.assertFalse(switch.is_on)
+            await event("startup")
+            self.assertTrue(switch.is_on)
+            self.assertEqual(
+                self.simulator.requests, [("GET", "/api/v3/values/aaab", {})]
+            )
+            self.simulator.values["aaab"] = "0"
+            self.simulator.requests.clear()
+            await event("startup")
+            self.assertFalse(switch.is_on)
+            self.assertEqual(
+                self.simulator.requests, [("GET", "/api/v3/values/aaab", {})]
+            )
+
+    async def test_project_and_ui_config_comparison(self) -> None:
+        """Exercise a real UID read while advancing only the coordinator's timer."""
+        await self.client.register_client("urn:homeassistant:test")
+        uid = (await self.client.get_ui_config())["uid"]
+        service = (await self.callback_url()).rsplit("/", 1)[0] + "/service"
+
+        async def tick(coordinator: _ConfigChange) -> None:
+            _, start, retries = coordinator.hass.loop.call_later.call_args.args
+            start(retries)
+            await coordinator.task
+            await asyncio.sleep(0)
+
+        for stored, status, expected in (
+            (uid, None, 0),
+            ("old", None, 1),
+            (None, None, 1),
+            (uid, 500, 1),
+        ):
+            clock = Mock()
+            reload_entry = AsyncMock()
+            runtime = Mock(
+                loop=clock,
+                async_create_task=asyncio.create_task,
+                config_entries=Mock(async_reload=reload_entry),
+            )
+            changes = _ConfigChange(runtime, "test-entry", self.client, stored)
+
+            self.hass.data[DOMAIN]["test-entry"]["changes"] = changes
+            async with self.session.post(
+                service,
+                json={
+                    "token": TOKEN,
+                    "events": [
+                        {"event": "uiConfigChanged"},
+                        {"event": "projectConfigChanged"},
+                        {"event": "uiConfigChanged"},
+                    ],
+                },
+            ) as response:
+                self.assertEqual(response.status, 200)
+            self.assertEqual(clock.call_later.call_count, 2)
+            self.assertEqual(clock.call_later.call_args.args[0], 10)
+            self.simulator.requests.clear()
+            self.simulator.error_status = 423
+            await tick(changes)
+            reload_entry.assert_not_awaited()
+            self.assertEqual(clock.call_later.call_args.args[0], 10)
+            self.simulator.error_status = status
+            await tick(changes)
+            self.assertEqual(reload_entry.await_count, expected)
+            self.assertEqual(
+                self.simulator.requests, [("GET", "/api/v3/uiconfig/uid", {})] * 2
+            )
+            await changes.stop()
+            self.simulator.error_status = None
+        clock.reset_mock()
+        changes = _ConfigChange(runtime, "test-entry", self.client, uid)
+        changes.request(project=True)
+        self.simulator.error_status = 423
+        for _ in range(3):
+            await tick(changes)
+        self.assertEqual(clock.call_later.call_count, 3)
+        changes.request()
+        await changes.stop()
+        clock.call_later.return_value.cancel.assert_called()
+
+    async def test_entry_setup_recovers_after_callback_probe_failure(self) -> None:
+        """HA retries setup without duplicating views, platforms or interval jobs."""
+        await self.client.register_client("urn:homeassistant:test")
+        url = await self.callback_url()
+        self.hass.data[DOMAIN].clear()
+        entry = Mock(
+            entry_id="test-entry",
+            data={
+                "host": self.client._host,
+                "username": "test-user",
+                "password": "test-password",
+                "client_id": "urn:homeassistant:test",
+                "access_token": TOKEN,
+            },
+        )
+        register = self.client.register_callbacks
+        ready = False
+
+        async def probe(_service: str, _value: str) -> bool:
+            return await register(
+                url.rsplit("/", 1)[0] + "/service",
+                url if ready else url + "/unavailable",
+            )
+
+        forward = AsyncMock()
+        with (
+            patch("custom_components.gira_one.GiraApiClient", return_value=self.client),
+            patch(
+                "custom_components.gira_one._async_register_device",
+                new=AsyncMock(return_value="hub"),
+            ),
+            patch("custom_components.gira_one._async_cleanup_stale_devices"),
+            patch(
+                "custom_components.gira_one.get_url", return_value="https://ha.example"
+            ),
+            patch.object(self.client, "register_callbacks", side_effect=probe),
+            patch.object(self.hass, "http", create=True) as http,
+            patch.object(
+                self.hass,
+                "config_entries",
+                Mock(async_forward_entry_setups=forward),
+                create=True,
+            ),
+            patch("custom_components.gira_one.async_track_time_interval") as interval,
+        ):
+            with self.assertRaisesRegex(ConfigEntryNotReady, "reachable"):
+                await async_setup_entry(self.hass, entry)
+            self.assertNotIn(entry.entry_id, self.hass.data[DOMAIN])
+            forward.assert_not_awaited()
+            interval.assert_not_called()
+            ready = True
+            self.assertTrue(await async_setup_entry(self.hass, entry))
+            self.assertEqual(http.register_view.call_count, 2)
+            forward.assert_awaited_once()
+            interval.assert_called_once()
+
     async def test_overlapping_failures_and_unload(self) -> None:
         """One follow-up covers losses mid-read; unload cancels that read."""
         refresh = _StateRefresh(self.hass, "test-entry", self.client)
@@ -286,9 +460,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
     async def test_point_suppression_keeps_state_readable(self) -> None:
         """The 51st event sticks locally; other points still deliver in the batch."""
         await self.client.register_client("urn:homeassistant:test")
-        await self.client.register_callbacks(
-            "https://demo/service", "https://demo/value"
-        )
+        await self.register_test_callbacks()
         self.hass.data[DOMAIN] = {
             "test-entry": {DATA_UI_CONFIG: await self.client.get_ui_config()}
         }
@@ -361,9 +533,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
     async def test_switch_and_dimmer_command_trace(self) -> None:
         """One on, off and brightness request produce exactly three point events."""
         await self.client.register_client("urn:homeassistant:test")
-        await self.client.register_callbacks(
-            "https://demo/service", "https://demo/value"
-        )
+        await self.register_test_callbacks()
         function = (await self.client.get_ui_config())["functions"][0]
         switch = GiraSwitch(Mock(entry_id="test-entry"), self.client, function, "hub")
         function["dataPoints"].append(
@@ -416,9 +586,7 @@ class GiraV3Tests(baseline.GiraBaselineTests):
         await self.client.register_client("urn:homeassistant:test")
         with self.assertLogs("custom_components.gira_one.api", level="DEBUG") as logs:
             await self.client.get_ui_config()
-            await self.client.register_callbacks(
-                "https://homeassistant/service", "https://homeassistant/value"
-            )
+            await self.register_test_callbacks()
             await self.client.remove_callbacks()
         self.assertNotIn(TOKEN, "\n".join(logs.output))
 

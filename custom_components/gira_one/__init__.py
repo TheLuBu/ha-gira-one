@@ -155,7 +155,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hub_device_id = await _async_register_device(hass, entry, api_client)
 
     refresh = _StateRefresh(hass, entry.entry_id, api_client)
+    changes = _ConfigChange(hass, entry.entry_id, api_client, ui_config.get("uid"))
     hass.data[DOMAIN][entry.entry_id] = {
+        "changes": changes,
         "refresh": refresh,
         DATA_API_CLIENT: api_client,
         DATA_UI_CONFIG: ui_config,
@@ -165,6 +167,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register callback views with HA and callback URLs with the Gira device
     if not await _async_register_callbacks(hass, entry, api_client):
+        await changes.stop()
         await refresh.stop()
         hass.data[DOMAIN].pop(entry.entry_id, None)
         raise ConfigEntryNotReady(
@@ -179,7 +182,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if api_client.api_version == API_VERSION:
 
         async def _refresh_states(_now: datetime) -> None:
-            refresh.request()
+            # A startup callback can itself be lost. Confirm readiness before
+            # re-enabling value reads on the regular five-minute interval.
+            if refresh.waiting_for_startup:
+                try:
+                    await api_client.get_server_details()
+                except GiraApiClientError:
+                    return
+                if refresh.waiting_for_startup:
+                    refresh.startup()
+            else:
+                refresh.request()
 
         # v3 may suppress callbacks after an event storm without notifying clients.
         entry.async_on_unload(
@@ -204,6 +217,89 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+class _ConfigChange:
+    """Coalesce UI/project events and avoid reloading a locked REST server."""
+
+    def __init__(
+        self, hass: HomeAssistant, entry_id: str, client: GiraApiClient, uid: str | None
+    ) -> None:
+        self.hass = hass
+        self.entry_id = entry_id
+        self.client = client
+        self.uid = uid
+        self.timer: asyncio.TimerHandle | None = None
+        self.task: asyncio.Task | None = None
+        self.reloading = False
+        self.check_again = False
+        self.stopped = False
+
+    @callback
+    def request(self, *, project: bool = False) -> None:
+        """A project download takes precedence over an immediate UI check."""
+        if self.stopped or self.reloading:
+            return
+        if project:
+            if self.timer:
+                self.timer.cancel()
+            if self.task and not self.task.done():
+                self.task.cancel()
+        elif self.timer:
+            return
+        elif self.task and not self.task.done():
+            self.check_again = True
+            return
+        self._schedule(10 if project else 0, 0)
+
+    def _schedule(self, delay: int, retries: int) -> None:
+        self.timer = self.hass.loop.call_later(delay, self._start, retries)
+
+    def _start(self, retries: int) -> None:
+        self.timer = None
+        self.check_again = False
+        self.task = self.hass.async_create_task(self._check(retries))
+
+    async def _check(self, retries: int) -> None:
+        try:
+            current = await self.client.get_ui_config_uid()
+        except GiraApiRequestError as err:
+            if err.status_code in (423, 429):
+                if retries < 2:
+                    self._schedule(10, retries + 1)
+                else:
+                    _LOGGER.warning(
+                        "Gira configuration check deferred after repeated HTTP %s",
+                        err.status_code,
+                    )
+                return
+        except GiraApiClientError:
+            pass
+        else:
+            if current and self.uid == current:
+                if self.check_again:
+                    self._schedule(0, 0)
+                return
+        self.reloading = True
+        # Reload unloads this coordinator. Keep it outside the cancellable read.
+        self.hass.async_create_task(self._reload())
+
+    async def _reload(self) -> None:
+        try:
+            if not self.stopped:
+                await self.hass.config_entries.async_reload(self.entry_id)
+        finally:
+            self.reloading = False
+
+    async def stop(self) -> None:
+        """Cancel pending reads before unloading the entry."""
+        self.stopped = True
+        if self.timer:
+            self.timer.cancel()
+        if self.task and not self.task.done():
+            self.task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.task
+
+
 class _StateRefresh:
     """Serialize interval and delivery-failure reads for one loaded entry."""
 
@@ -215,16 +311,32 @@ class _StateRefresh:
         self.client = client
         self.task: asyncio.Task | None = None
         self.pending = False
+        self.waiting_for_startup = False
         self.stopped = False
 
     @callback
     def request(self) -> None:
         """Coalesce requests, retaining failures received after a pass started."""
-        if self.stopped:
+        if self.stopped or self.waiting_for_startup:
             return
         self.pending = True
         if self.task is None or self.task.done():
             self.task = self.hass.async_create_task(self._run())
+
+    async def restart(self) -> None:
+        """Suspend reads while Gira is restarting."""
+        self.waiting_for_startup = True
+        self.pending = False
+        previous, self.task = self.task, None
+        if previous and not previous.done():
+            previous.cancel()
+            with suppress(asyncio.CancelledError):
+                await previous
+
+    def startup(self) -> None:
+        """Reconcile when the Gira service is ready, even without prior notice."""
+        self.waiting_for_startup = False
+        self.request()
 
     async def _run(self) -> None:
         while self.pending:
@@ -282,7 +394,7 @@ async def _async_register_device(
         identifiers={(DOMAIN, entry.unique_id or entry.data[CONF_HOST])},
         name=entry.title,
         manufacturer="Gira",
-        model=server_details.get("deviceType", "Gira One Server"),
+        model=server_details.get("deviceType"),
         sw_version=server_details.get("deviceVersion"),
     )
     return hub_device.id
@@ -360,8 +472,11 @@ async def _async_register_callbacks(
     _LOGGER.info("Registering Gira service callback URL: %s", service_callback_url)
     _LOGGER.info("Registering Gira value callback URL: %s", value_callback_url)
 
-    hass.http.register_view(GiraServiceCallbackView(hass, entry.entry_id))
-    hass.http.register_view(GiraValueCallbackView(hass, entry.entry_id))
+    registered = hass.data.setdefault(f"{DOMAIN}_callback_views", set())
+    if entry.entry_id not in registered:
+        hass.http.register_view(GiraServiceCallbackView(hass, entry.entry_id))
+        hass.http.register_view(GiraValueCallbackView(hass, entry.entry_id))
+        registered.add(entry.entry_id)
 
     try:
         if not await api_client.register_callbacks(
@@ -394,6 +509,7 @@ async def _async_cleanup_resources(
     if api_client is None:
         return
 
+    await entry_data["changes"].stop()
     await entry_data["refresh"].stop()
 
     # Prevent re-auth loop during cleanup
@@ -528,19 +644,19 @@ class GiraServiceCallbackView(BaseGiraCallbackView):
             event_type = event_data.get("event")
             _LOGGER.info("Processing Gira service event: %s", event_type)
 
-            if event_type in (
-                EVENT_TYPE_TEST,
-                EVENT_TYPE_STARTUP,
-                EVENT_TYPE_RESTART,
+            entry_data = self.hass.data[DOMAIN][self.entry_id]
+            if event_type == EVENT_TYPE_TEST:
+                continue
+            if event_type == EVENT_TYPE_RESTART:
+                await entry_data["refresh"].restart()
+            elif event_type == EVENT_TYPE_STARTUP:
+                entry_data["refresh"].startup()
+            elif event_type in (
                 EVENT_TYPE_PROJECT_CONFIG_CHANGED,
+                EVENT_TYPE_UI_CONFIG_CHANGED,
             ):
-                _LOGGER.info("Received informational event: %s", event_type)
-            elif event_type == EVENT_TYPE_UI_CONFIG_CHANGED:
-                _LOGGER.warning(
-                    "Gira device reported 'uiConfigChanged'; reloading the integration"
-                )
-                self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self.entry_id)
+                entry_data["changes"].request(
+                    project=event_type == EVENT_TYPE_PROJECT_CONFIG_CHANGED
                 )
             else:
                 _LOGGER.warning("Unknown Gira service event type: %s", event_type)

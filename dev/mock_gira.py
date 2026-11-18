@@ -25,13 +25,13 @@ class GiraSimulator:
     """Keep state across actual HTTP requests from Home Assistant."""
 
     def __init__(
-        self, version: str = "v2", clock: Callable[[], float] = monotonic
+        self, version: str = "v3", clock: Callable[[], float] = monotonic
     ) -> None:
         """Initialize the synthetic switch and record requests for assertions."""
         self.version = version
         self.registered = False
         self.callbacks: dict = {}
-        self.values = {"aaab": "0", "bbba": "0"}
+        self.values = {"aaab": "0", "bbba": "0", "ccca": "0"}
         self.clock = clock
         self.global_events: deque[float] = deque()
         self.point_events: dict[str, deque[float]] = defaultdict(deque)
@@ -44,6 +44,30 @@ class GiraSimulator:
         self.app = web.Application()
         self.app.router.add_route("*", "/api/{version}", self.handle)
         self.app.router.add_route("*", "/api/{version}/{tail:.*}", self.handle)
+
+    @staticmethod
+    async def _probe_callbacks(body: dict) -> bool:
+        """Verify the configured HTTPS receivers before accepting registration."""
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as session:
+                for key, events in (
+                    ("serviceCallback", [{"event": "test"}]),
+                    ("valueCallback", []),
+                ):
+                    if key in body:
+                        async with session.post(
+                            body[key],
+                            json={"token": TOKEN, "events": events},
+                            ssl=False,
+                            allow_redirects=False,
+                        ) as probe:
+                            if probe.status != 200:
+                                return False
+        except (aiohttp.ClientError, TimeoutError):
+            return False
+        return True
 
     async def handle(self, request: web.Request) -> web.Response:
         """Serve the subset needed by config flow, setup, commands and cleanup."""
@@ -90,12 +114,16 @@ class GiraSimulator:
                 if key in body
             ):
                 return self.error(422, "unprocessable")
+            if body.get("testCallbacks") and not await self._probe_callbacks(body):
+                return self.error(400, "callbackTestFailed")
             self.callbacks = body
             return web.json_response({})
         if path == f"clients/{TOKEN}" and request.method == "DELETE":
             self.registered = False
             self.callbacks = {}
             return web.Response(status=204)
+        if path == "uiconfig/uid":
+            return web.json_response({"uid": self.ui_config(version)["uid"]})
         if path == "uiconfig":
             return web.json_response(self.ui_config(version))
         if path.startswith("values/"):
@@ -238,6 +266,26 @@ class GiraSimulator:
                         }
                     ),
                 },
+                {
+                    "uid": "cccc",
+                    "displayName": "Test trigger",
+                    "functionType": "de.gira.schema.functions.Trigger",
+                    "channelType": "de.gira.schema.channels.Trigger2"
+                    if version == "v3"
+                    else "de.gira.schema.channels.Trigger",
+                    "dataPoints": [
+                        {
+                            "uid": "ccca",
+                            "name": "Trigger",
+                            "canRead": False,
+                            "canWrite": True,
+                            "canEvent": True,
+                        }
+                    ],
+                    "parameters": [
+                        {"set": "Standard", "key": "Command", "value": "On"}
+                    ],
+                },
             ],
             "locations": [{"displayName": "Test room", "functions": ["aaaa"]}],
             "trades": [],
@@ -246,7 +294,7 @@ class GiraSimulator:
 
 if __name__ == "__main__":
     # The simulator is never published to a host port by Compose.
-    simulator = GiraSimulator(os.environ.get("GIRA_MOCK_API_VERSION", "v2"))
+    simulator = GiraSimulator(os.environ.get("GIRA_MOCK_API_VERSION", "v3"))
     with tempfile.TemporaryDirectory() as tls_directory:
         web.run_app(
             simulator.app,
