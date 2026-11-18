@@ -15,7 +15,7 @@ Pull requests are the best way to propose changes to the codebase.
 
 1. Fork the repo and create your branch from `main`.
 2. If you've changed something, update the documentation.
-3. Make sure your code lints (using `scripts/lint`).
+3. Run the Ruff checks and tests described in [Local development](docs/DEVELOPMENT.md).
 4. Test you contribution.
 5. Issue that pull request!
 
@@ -59,17 +59,15 @@ Format: `<type>: <description>`
 
 ## Use a Consistent Coding Style
 
-Use [black](https://github.com/ambv/black) to make sure the code follows the style.
+Use the pinned [Ruff](https://docs.astral.sh/ruff/) version in `requirements.txt`
+for linting and formatting.
 
 ## Test your code modification
 
-This custom component is based on [integration_blueprint template](https://github.com/ludeeus/integration_blueprint).
-
-It comes with development environment in a container, easy to launch
-if you use Visual Studio Code. With this container you will have a stand alone
-Home Assistant instance running and already configured with the included
-[`configuration.yaml`](./config/configuration.yaml)
-file.
+See [Local development](docs/DEVELOPMENT.md) for the pinned Home Assistant
+container, HTTPS Gira simulator, regression tests and complete HA smoke test.
+The demo is disposable and separate from the real installation. Hardware checks
+are still required before a release.
 
 ## License
 

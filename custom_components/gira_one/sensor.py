@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -30,6 +31,7 @@ from .const import (
     DP_TARGET_TEMP,
     GIRA_FUNCTION_TYPE_TO_HA_PLATFORM,
 )
+from .entity import GiraStateEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +54,9 @@ async def async_setup_entry(
     location_map: dict[str, str] = entry_data.get(DATA_LOCATION_MAP, {})
     hub_device_id: str = entry_data[DATA_HUB_DEVICE_ID]
 
-    entities: list[SensorEntity] = []
+    entities: list[SensorEntity] = list(
+        GiraFloatStatus.discover(hass, config_entry, "sensor")
+    )
     for function_data in ui_config.get("functions", []):
         if (
             GIRA_FUNCTION_TYPE_TO_HA_PLATFORM.get(function_data.get("functionType"))
@@ -149,7 +153,7 @@ class GiraTemperatureSensor(SensorEntity):
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial value of the temperature data point."""
         try:
-            data = await self._api.get_value(self._function_uid)
+            data = await self._api.get_value(self._dp_uid)
         except GiraApiClientError as err:
             _LOGGER.debug(
                 "Error fetching initial state for sensor %s: %s",
@@ -178,4 +182,44 @@ class GiraTemperatureSensor(SensorEntity):
         if self._attr_native_value == new_value:
             return False
         self._attr_native_value = new_value
+        return True
+
+
+class GiraFloatStatus(GiraStateEntity, SensorEntity):
+    """Represent a numeric GPA status value."""
+
+    _attr_name = None
+
+    @property
+    def supported(self) -> bool:
+        """Require a readable Float datapoint."""
+        return bool(
+            self._get_dp_uid("Float") and self._data_points["Float"].get("canRead")
+        )
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Use a unit only when the project provides one unambiguous Unit."""
+        units = {
+            p["value"].strip()
+            for p in self._function_data.get("parameters", [])
+            if p.get("key") == "Unit"
+            and isinstance(p.get("value"), str)
+            and p["value"].strip()
+        }
+        return next(iter(units)) if len(units) == 1 else None
+
+    def _update_state_from_dp_value(self, dp_uid_updated: str, value: Any) -> bool:
+        """Keep finite numeric values including zero and negative readings."""
+        if dp_uid_updated != self._get_dp_uid("Float"):
+            return False
+        try:
+            parsed = float(str(value))
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is not None and not math.isfinite(parsed):
+            parsed = None
+        if parsed == self.native_value:
+            return False
+        self._attr_native_value = parsed
         return True

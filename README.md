@@ -5,21 +5,39 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Validate](https://github.com/tbsv/ha-gira-one/actions/workflows/validate.yml/badge.svg)](https://github.com/tbsv/ha-gira-one/actions/workflows/validate.yml)
 
-This integration connects Home Assistant to a **Gira One Server** via its local REST API. It is based on the [Gira IoT REST API specification](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf).
+This integration connects Home Assistant to a **Gira One Server** via its local REST API. It is based on the [Gira IoT REST API v3 specification](https://partner.gira.de/data3/Gira_IoT_REST_API_v3_DE.pdf), with automatic fallback to [v2](https://partner.gira.de/data3/Gira_IoT_REST_API_v2_DE.pdf) when the v3 endpoint is unavailable (HTTP 404).
 It exposes lights, covers, and room thermostats as native Home Assistant entities and receives real-time status updates via callbacks (Local Push), so state changes made at the physical switch or in the Gira app are immediately reflected in Home Assistant.
 
 > [!IMPORTANT]
 > **Home Assistant must be reachable from the Gira One Server via an HTTPS URL.** The Gira One Server pushes state updates back to Home Assistant via HTTP callbacks and explicitly rejects non-HTTPS targets. Either an *internal* or an *external* URL works, as long as it uses `https://` and the Gira Server can reach it on the network. The integration will refuse to set up if no HTTPS URL is configured.
 
+## API v3 compatibility
+
+- The API version is detected during initial configuration, integration setup/reload and removal. Existing config entries, client IDs and entity unique IDs are preserved.
+- v3 callback registration enables `batchEvents`; every event in a callback batch is processed. v2 registration omits that option.
+- Registration tests both HTTPS callback routes. HA retries setup if the return path is unavailable. After a Gira startup, HA refreshes readable states. UI and project change events trigger a configuration UID check before reloading the entry.
+- Download diagnostics from the integration entry to see the server model, firmware, API version, function counts and time of the last successful request.
+- Gira scenes appear under their function device when the server supplies a scene number and writable recall datapoint. Each activation sends the published number once.
+- v3 can suppress value callbacks after an event storm. A read-only reconciliation every five minutes recovers current states while callbacks are missing. It does not reset the server's protection or recover intermediate events.
+- HTTP 429 starts a five-second request cooldown. Commands are not automatically replayed. Invalid-token responses start reauthentication; access denied to an individual UID does not.
+
+See [Local development](docs/DEVELOPMENT.md) for the reproducible HA runtime, HTTPS simulator, tests and the hardware checks still required before release.
+
+See the [firmware 4.0 support matrix](docs/FIRMWARE_4_CHANNELS.md) for the channel contracts, fixture coverage and platform limits.
+
 ## Features
 
 | Platform | Capabilities |
 |---|---|
+| **Button** | Execute the configured Trigger or Trigger2 action |
+| **Binary sensor** | Generic read-only BinaryStatus |
+| **Media player** | Gira Audio and Sonos.Audio playback, volume, optional mute, track navigation and track/playlist metadata. Playlist selection and cover art are outside the current scope. |
 | **Switch** | On/off |
 | **Light** | On/off, brightness (dimming), color temperature (tunable white), RGB/W color |
 | **Cover** | Open, close, stop, set position, set tilt (slat) position — for roller shutters and venetian blinds |
 | **Climate** | Current temperature, target temperature, HVAC mode, preset modes (Comfort, Eco/Night, Away/Standby, Protection) |
-| **Sensor** | Current and target temperature exposed as dedicated sensor entities per Gira climate function (for graphing and automations) |
+| **Scene** | Activate a numbered Gira scene |
+| **Sensor** | Current and target temperature per climate function, plus read-only NumericFloatStatus with a unit when supplied by the project |
 
 ### Supported Gira function types
 
@@ -33,6 +51,32 @@ Behind the scenes, the following Gira function types are mapped automatically:
 - `de.gira.schema.functions.KNX.HeatingCooling` → Climate
 - `de.gira.schema.functions.KNX.FanCoil` → Climate
 - `de.gira.schema.functions.SaunaHeating` → Climate
+
+### Gira icons
+
+Switches with a radiator (11), plug (15) or musical note (72) use corresponding
+on/off icons in Home Assistant. Scenes also recognize the crescent moon (3),
+star (4) and heart (76). These are entity defaults and HA icon customizations
+take precedence. Other IDs, including `-1`, and v2 entries without an icon
+use the platform defaults. Covers, lights and climate entities retain HA's
+state-aware presentation. Location names suggest HA areas. Gira trade and
+location icons are project metadata, while HA areas are user-managed and may
+be shared by multiple integrations.
+
+The numbers come from the [GPA project interface pictogram table, page 15](https://partner.gira.com/data3/GPA-Projektschnittstelle_Dokumentation.pdf#page=15).
+
+### Scene discovery
+
+`FunctionScene` and legacy `SceneSet` recall through `Execute`. Legacy
+`SceneControl` recalls through `Scene`. Only a writable recall point is used.
+HA never sends a teach command. v3 supplies scene names and numbers in
+`scenes`. When that list is missing or empty, a configured GPA `Scene`
+parameter can supply the number (also on v2). A function without either
+source is skipped. Renaming a scene preserves its identity as long as its
+function UID and scene number are stable.
+
+See the [REST API channel definitions, sections 5.2 and 10](https://partner.gira.de/data3/Gira_IoT_REST_API_v3_DE.pdf)
+and [GPA project interface, scene parameters](https://partner.gira.com/data3/GPA_Project_Interface_Documentation.pdf).
 
 ## Prerequisites
 

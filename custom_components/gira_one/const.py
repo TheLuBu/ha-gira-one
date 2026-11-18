@@ -9,7 +9,18 @@ COVER = "cover"
 CLIMATE = "climate"
 SWITCH = "switch"
 SENSOR = "sensor"
-PLATFORMS = [LIGHT, SWITCH, COVER, CLIMATE, SENSOR]
+SCENE = "scene"
+PLATFORMS = [
+    "button",
+    "binary_sensor",
+    "media_player",
+    LIGHT,
+    SWITCH,
+    COVER,
+    CLIMATE,
+    SENSOR,
+    SCENE,
+]
 
 # Configuration
 CONF_HOST = "host"
@@ -17,7 +28,8 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"  # noqa: S105
 
 # API constants
-API_VERSION = "v2"
+API_VERSION = "v3"
+API_FALLBACK_VERSION = "v2"
 CLIENT_URN_PREFIX = "urn:homeassistant:gira_one"
 
 # Data
@@ -28,6 +40,13 @@ DATA_HUB_DEVICE_ID = "hub_device_id"
 
 # Supported Gira function types to HA platforms mapping
 GIRA_FUNCTION_TYPE_TO_HA_PLATFORM = {
+    "de.gira.schema.functions.Audio": "media_player",
+    "de.gira.schema.functions.Sonos.Audio": "media_player",
+    "de.gira.schema.functions.BinaryStatus": "binary_sensor",
+    "de.gira.schema.functions.NumericFloatStatus": SENSOR,
+    "de.gira.schema.functions.Trigger": "button",
+    "de.gira.schema.functions.Scene": SCENE,
+    "de.gira.schema.functions.FunctionScene": SCENE,
     "de.gira.schema.functions.Switch": SWITCH,
     "de.gira.schema.functions.KNX.Light": LIGHT,
     "de.gira.schema.functions.ColoredLight": LIGHT,

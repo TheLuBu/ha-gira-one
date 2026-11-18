@@ -8,9 +8,10 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_HS_COLOR,
+    ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
     ColorMode,
     LightEntity,
-    LightEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -32,7 +33,7 @@ from .const import (
     GIRA_FUNCTION_TYPE_TO_HA_PLATFORM,
     LIGHT,
 )
-from .entity import GiraOneEntity  # Import the new base class
+from .entity import GiraOneEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,60 +101,26 @@ class GiraLight(GiraOneEntity, LightEntity):
         self._attr_is_on = None
         self._attr_brightness = None
         self._attr_color_temp_kelvin = None
-        self._attr_hs_color = None
+        self._color_values: dict[str, int] = {}
+        self._color_points = (DP_RED, DP_GREEN, DP_BLUE)
+        if self._has_dp(DP_WHITE):
+            self._color_points += (DP_WHITE,)
 
-        self._update_supported_color_modes_and_features()
-
-    def _update_supported_color_modes_and_features(self) -> None:
-        """Determine supported color modes and features based on available data points."""
-        supported_color_modes = set()
-        supported_features = LightEntityFeature(0)
-
-        if self._has_dp(DP_ON_OFF):
-            supported_color_modes.add(ColorMode.ONOFF)
-
-        if self._has_dp(DP_BRIGHTNESS):
-            supported_color_modes.add(ColorMode.BRIGHTNESS)
-
-        if self._has_dp(DP_COLOR_TEMPERATURE):
-            supported_color_modes.add(ColorMode.COLOR_TEMP)
-
-        if self._has_dp(DP_RED) and self._has_dp(DP_GREEN) and self._has_dp(DP_BLUE):
-            supported_color_modes.add(ColorMode.HS)
-            channel_type = self._function_data.get("channelType", "")
-            if "RGBW" in channel_type and self._has_dp(DP_WHITE):
-                supported_color_modes.add(ColorMode.RGBW)
-            else:
-                supported_color_modes.add(ColorMode.RGB)
-
-        if len(supported_color_modes) > 1 and ColorMode.ONOFF in supported_color_modes:
-            supported_color_modes.remove(ColorMode.ONOFF)
-
-        if not supported_color_modes:
-            supported_color_modes.add(ColorMode.ONOFF)
-
-        self._attr_supported_color_modes = supported_color_modes
-        self._attr_supported_features = supported_features
-
-        # Determine primary color mode
-        # (This logic could be simplified, but is functional)
-        if ColorMode.HS in supported_color_modes:
-            self._attr_color_mode = ColorMode.HS
-        elif ColorMode.RGBW in supported_color_modes:
-            self._attr_color_mode = ColorMode.RGBW
-        elif ColorMode.RGB in supported_color_modes:
-            self._attr_color_mode = ColorMode.RGB
-        elif ColorMode.COLOR_TEMP in supported_color_modes:
-            self._attr_color_mode = ColorMode.COLOR_TEMP
-        elif ColorMode.BRIGHTNESS in supported_color_modes:
-            self._attr_color_mode = ColorMode.BRIGHTNESS
+        if all(self._has_dp(dp) for dp in self._color_points):
+            mode = ColorMode.RGBW if self._has_dp(DP_WHITE) else ColorMode.RGB
+        elif self._has_dp(DP_COLOR_TEMPERATURE):
+            mode = ColorMode.COLOR_TEMP
+        elif self._has_dp(DP_BRIGHTNESS):
+            mode = ColorMode.BRIGHTNESS
         else:
-            self._attr_color_mode = ColorMode.ONOFF
+            mode = ColorMode.ONOFF
+        self._attr_color_mode = mode
+        self._attr_supported_color_modes = {mode}
 
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial state of the light."""
         try:
-            data = await self._api.get_value(self.unique_id)
+            data = await self._api.get_function_values(self._function_data)
             if data and "values" in data:
                 for dp_value_info in data["values"]:
                     self._update_state_from_dp_value(
@@ -177,7 +144,7 @@ class GiraLight(GiraOneEntity, LightEntity):
                             changed = True
                     elif dp_name == DP_BRIGHTNESS:
                         # Gira 0-100 -> HA 0-255
-                        brightness = int(float(value) * 2.55)
+                        brightness = round(float(value) * 255 / 100)
                         if self._attr_brightness != brightness:
                             self._attr_brightness = brightness
                             changed = True
@@ -186,8 +153,30 @@ class GiraLight(GiraOneEntity, LightEntity):
                         if self._attr_color_temp_kelvin != color_temp:
                             self._attr_color_temp_kelvin = color_temp
                             changed = True
-                    # Note: Reading RGB values and converting to HS is complex
-                    # as it requires all 3 values. We handle this on write.
+                    elif dp_name in self._color_points:
+                        percentage = float(value)
+                        if not 0 <= percentage <= 100:
+                            return False
+                        self._color_values[dp_name] = round(percentage * 255 / 100)
+                        if all(
+                            point in self._color_values for point in self._color_points
+                        ):
+                            color = tuple(
+                                self._color_values[point]
+                                for point in self._color_points
+                            )
+                            if (
+                                self.color_mode == ColorMode.RGBW
+                                and self.rgbw_color != color
+                            ):
+                                self._attr_rgbw_color = color
+                                changed = True
+                            elif (
+                                self.color_mode == ColorMode.RGB
+                                and self.rgb_color != color
+                            ):
+                                self._attr_rgb_color = color
+                                changed = True
                 except (ValueError, TypeError):
                     return False
                 return changed
@@ -196,13 +185,14 @@ class GiraLight(GiraOneEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
         payloads = []
+        has_brightness = ATTR_BRIGHTNESS in kwargs and self._has_dp(DP_BRIGHTNESS)
 
-        # Always send ON command
-        if self._has_dp(DP_ON_OFF):
+        # Brightness also switches on; an extra ON can recall switch-on brightness.
+        if self._has_dp(DP_ON_OFF) and not has_brightness:
             payloads.append({"uid": self._get_dp_uid(DP_ON_OFF), "value": 1})
 
         # Brightness
-        if ATTR_BRIGHTNESS in kwargs and self._has_dp(DP_BRIGHTNESS):
+        if has_brightness:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             gira_brightness = round((ha_brightness / 255) * 100)
             payloads.append(
@@ -218,26 +208,14 @@ class GiraLight(GiraOneEntity, LightEntity):
                 }
             )
 
-        # HS Color
-        if ATTR_HS_COLOR in kwargs and self._has_dp(DP_RED):
-            rgb_color = color_util.color_hs_to_RGB(*kwargs[ATTR_HS_COLOR])
-            payloads.append(
-                {
-                    "uid": self._get_dp_uid(DP_RED),
-                    "value": round((rgb_color[0] / 255) * 100),
-                }
-            )
-            payloads.append(
-                {
-                    "uid": self._get_dp_uid(DP_GREEN),
-                    "value": round((rgb_color[1] / 255) * 100),
-                }
-            )
-            payloads.append(
-                {
-                    "uid": self._get_dp_uid(DP_BLUE),
-                    "value": round((rgb_color[2] / 255) * 100),
-                }
+        # HA translates user-selected colors to the advertised native mode.
+        color = kwargs.get(ATTR_RGBW_COLOR) or kwargs.get(ATTR_RGB_COLOR)
+        if color is None and ATTR_HS_COLOR in kwargs:
+            color = color_util.color_hs_to_RGB(*kwargs[ATTR_HS_COLOR])
+        if color is not None and self.color_mode in (ColorMode.RGB, ColorMode.RGBW):
+            payloads.extend(
+                {"uid": self._get_dp_uid(point), "value": round(component * 100 / 255)}
+                for point, component in zip(self._color_points, color, strict=False)
             )
 
         if payloads:

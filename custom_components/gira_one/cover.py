@@ -119,11 +119,11 @@ class GiraCover(GiraOneEntity, CoverEntity):
     def _update_supported_features(self) -> None:
         """Determine supported features based on all available data points."""
         features = CoverEntityFeature(0)
-        if self._can_write_dp(DP_POSITION) or self._has_dp(DP_UP_DOWN):
+        if self._can_write_dp(DP_POSITION) or self._can_write_dp(DP_UP_DOWN):
             features |= CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
         if self._can_write_dp(DP_POSITION):
             features |= CoverEntityFeature.SET_POSITION
-        if self._has_dp(DP_STEP_UP_DOWN):
+        if self._can_write_dp(DP_STEP_UP_DOWN):
             features |= CoverEntityFeature.STOP
         if self._can_write_dp(DP_SLAT_POSITION):
             features |= (
@@ -138,7 +138,7 @@ class GiraCover(GiraOneEntity, CoverEntity):
     async def _fetch_initial_state(self) -> None:
         """Fetch the initial state of the cover."""
         try:
-            data = await self._api.get_value(self.unique_id)
+            data = await self._api.get_function_values(self._function_data)
             if data and "values" in data:
                 for dp_value_info in data["values"]:
                     self._update_state_from_dp_value(
@@ -192,7 +192,7 @@ class GiraCover(GiraOneEntity, CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         _LOGGER.debug("Opening cover %s", self._display_name)
-        if self._has_dp(DP_UP_DOWN):
+        if self._can_write_dp(DP_UP_DOWN):
             await self._send_command(DP_UP_DOWN, 0)
         else:
             # Home Assistant standard: 100 is open.
@@ -207,7 +207,7 @@ class GiraCover(GiraOneEntity, CoverEntity):
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         _LOGGER.debug("Closing cover %s", self._display_name)
-        if self._has_dp(DP_UP_DOWN):
+        if self._can_write_dp(DP_UP_DOWN):
             await self._send_command(DP_UP_DOWN, 1)
         else:
             # Home Assistant standard: 0 is closed.
@@ -221,9 +221,7 @@ class GiraCover(GiraOneEntity, CoverEntity):
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
-        if self._has_dp(DP_STEP_UP_DOWN):
-            _LOGGER.debug("Stopping cover %s", self._display_name)
-            await self._send_command(DP_STEP_UP_DOWN, 1)
+        await self._send_command(DP_STEP_UP_DOWN, 1)
 
         # Optimistic update
         self._attr_is_moving = False
@@ -261,9 +259,7 @@ class GiraCover(GiraOneEntity, CoverEntity):
 
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:
         """Stop the cover tilt."""
-        if self._has_dp(DP_STEP_UP_DOWN):
-            _LOGGER.debug("Stopping cover tilt on %s", self._display_name)
-            await self._send_command(DP_STEP_UP_DOWN, 1)
+        await self._send_command(DP_STEP_UP_DOWN, 1)
 
         # Optimistic update
         self._attr_is_moving = False

@@ -1,6 +1,9 @@
 {
   "domain": "gira_one",
   "name": "Gira One",
+  "categories": [
+    "hubs_protocols.building_automation"
+  ],
   "codeowners": [
     "@tbsv"
   ],

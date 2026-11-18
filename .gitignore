@@ -11,6 +11,12 @@ __pycache__
 .vscode
 coverage.xml
 .ruff_cache
+.venv/
+.env
+.env.hardware
+.hardware/
+.dev-baseline/
+.dev-baseline.tar
 
 
 # Jetbrains
@@ -20,3 +26,6 @@ coverage.xml
 # Home Assistant configuration
 config/*
 !config/configuration.yaml
+
+# Local Compose network or port settings
+/compose.override.yaml
