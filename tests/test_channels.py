@@ -16,6 +16,7 @@ from custom_components.gira_one import (
     sensor,
     switch,
 )
+from custom_components.gira_one.api import GiraApiConnectionError, GiraApiRequestError
 from custom_components.gira_one.const import (
     DATA_API_CLIENT,
     DATA_HUB_DEVICE_ID,
@@ -135,6 +136,41 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
             self.api.set_value.assert_awaited_once()
             fn["parameters"].append({"key": "Command", "value": "Off"})
             self.assertFalse(await self.discover([fn]))
+
+    async def test_rejected_switch_and_cover_commands(self) -> None:
+        """Failed writes reach HA once and preserve confirmed or accepted cover state."""
+        fn = fixture("Switch")
+        switch = (await self.discover([fn]))[fn["uid"]]
+        self.api.set_value.side_effect = GiraApiRequestError(
+            "429 cooldown", status_code=429
+        )
+        with self.assertRaisesRegex(HomeAssistantError, "429"):
+            await switch.async_turn_off()
+        self.api.set_value.assert_awaited_once()
+        fn = fixture("Blind2")
+        cover_entity = (await self.discover([fn]))[fn["uid"]]
+        with patch.object(cover_entity, "async_write_ha_state"):
+            await cover_entity.async_open_cover()
+            await cover_entity.async_set_cover_position(position=40)
+            await cover_entity.async_set_cover_tilt_position(tilt_position=55)
+            for command, args in (
+                (cover_entity.async_set_cover_position, {"position": 75}),
+                (cover_entity.async_set_cover_tilt_position, {"tilt_position": 90}),
+                (cover_entity.async_stop_cover, {}),
+            ):
+                self.api.set_value.reset_mock()
+                self.api.set_value.side_effect = GiraApiConnectionError("unreachable")
+                with self.assertRaisesRegex(HomeAssistantError, "unreachable"):
+                    await command(**args)
+                self.api.set_value.assert_awaited_once()
+                self.assertEqual(cover_entity.current_cover_position, 40)
+                self.assertEqual(cover_entity.current_cover_tilt_position, 55)
+                self.assertTrue(cover_entity.is_opening)
+            del cover_entity._data_points["Step-Up-Down"]
+            self.api.set_value.reset_mock()
+            with self.assertRaisesRegex(HomeAssistantError, "missing"):
+                await cover_entity.async_stop_cover()
+            self.api.set_value.assert_not_awaited()
 
     async def test_switch_and_cover_commands_and_feedback(self) -> None:
         """Both channel generations preserve switch and inverted cover semantics."""
