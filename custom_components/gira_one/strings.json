@@ -11,7 +11,7 @@
         },
         "description": "Detected HTTPS address: **{detected_url}**. A dash means no address was found.",
         "data_description": {
-          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed, e.g. https://ha.example.org:8123. The callback paths are added automatically."
+          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed. The callback paths are added automatically."
         }
       },
       "reauth_confirm": {
@@ -29,7 +29,7 @@
           "callback_url": "Manual callback base URL"
         },
         "data_description": {
-          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed, e.g. https://ha.example.org:8123. The callback paths are added automatically."
+          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed. The callback paths are added automatically."
         }
       }
     },

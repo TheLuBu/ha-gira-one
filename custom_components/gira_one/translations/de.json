@@ -11,7 +11,7 @@
         },
         "description": "Automatisch ermittelte HTTPS-Adresse: **{detected_url}**. Ein Strich bedeutet, dass keine Adresse gefunden wurde.",
         "data_description": {
-          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben, z. B. https://ha.example.org:8123. Die Callback-Pfade werden automatisch ergänzt."
+          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben. Die Callback-Pfade werden automatisch ergänzt."
         }
       },
       "reauth_confirm": {
@@ -29,7 +29,7 @@
           "callback_url": "Manuelle Callback-Basisadresse"
         },
         "data_description": {
-          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben, z. B. https://ha.example.org:8123. Die Callback-Pfade werden automatisch ergänzt."
+          "callback_url": "Für die automatische Erkennung leer lassen. Bei Bedarf die vom Gira-Server erreichbare HTTPS-Adresse von Home Assistant mit optionalem Port eingeben. Die Callback-Pfade werden automatisch ergänzt."
         }
       }
     },
