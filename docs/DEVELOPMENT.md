@@ -3,10 +3,33 @@
 Requires Git and Docker Desktop with Linux containers. No host Python, Gira
 credentials or connection to the real installation is needed for the simulator.
 
-The runtime is Home Assistant **2026.11.2**, pinned by image digest in `Dockerfile`.
-Ruff uses the version already pinned in `requirements.txt`. Tests use Python's
-standard-library `unittest` and the HA image's existing aiohttp and cryptography
-packages; there is no second Home Assistant dependency tree to keep in sync.
+The simulator, tests and disposable demo share a Python 3.14 slim image with
+Home Assistant **2026.11.2**, its matching frontend, and the dependencies used
+by onboarding and the tested integrations. Home Assistant may log setup errors
+for optional core integrations outside the demo, including camera/stream, voice
+assist and infrared. The hardware profile uses the
+official Home Assistant image for the same release. Both base images are pinned
+by digest in `Dockerfile`. The tests use Python's standard-library `unittest`
+and the Ruff version in `requirements.txt`.
+
+### Image size and build time
+
+Measured on Docker Desktop, Linux/amd64, with base images already present.
+Both builds used `docker compose --profile demo build --no-cache tests gira homeassistant`.
+Sizes are decimal MB from `docker image inspect`. All three service images in
+each build had identical filesystem layer lists. The stack column counts those
+layers once and excludes Docker's build cache and the separate hardware profile.
+
+| Build | Test image | Smoke stack | Build time |
+| --- | ---: | ---: | ---: |
+| Official HA image plus development environment | 3,603 MB | 3,603 MB | 21 s |
+| Python slim plus the tested HA components | 1,585 MB | 1,585 MB | 317 s |
+
+The slim build saves **2,018 MB (56.0%)** for the tests and the smoke stack.
+The original image's largest layers were approximately 1.68 GB, 420 MB, 298 MB
+and 127 MB. Its development layer added about 26 MB. The official base already
+contained the HA packages, while the slim build downloads and installs them.
+These times include local image export and depend on network and disk speed.
 
 ## Run the tests
 
@@ -60,23 +83,23 @@ Stop the two demo services when finished:
 docker compose --profile demo stop homeassistant gira
 ```
 
-The project uses its own subnet `10.254.230.0/24`, because the development host's
-automatic Docker address pools were exhausted. Set `GIRA_DEV_SUBNET` to another
-unused subnet if it overlaps a local network. No other Docker network is removed.
+Docker Compose automatically selects the development network. To configure a local
+subnet, set `networks.default.ipam.config[].subnet` in `compose.override.yaml`.
+Git ignores this local override.
 
 ## Simulate API versions
 
-The simulator defaults to **v2**. It also supports **v3**. Select v3 in PowerShell:
+The simulator defaults to **v3**. Select the legacy v2 server in PowerShell:
 
 ```powershell
-$env:GIRA_MOCK_API_VERSION = 'v3'
+$env:GIRA_MOCK_API_VERSION = 'v2'
 docker compose --profile demo up -d gira
 docker compose --profile demo restart homeassistant
 docker compose run --rm tests python -m dev.smoke
 ```
 
-On Linux/macOS, set `export GIRA_MOCK_API_VERSION=v3` instead. To switch back,
-set the same variable to `v2`, recreate `gira` using `up -d`, and restart HA.
+On Linux/macOS, set `export GIRA_MOCK_API_VERSION=v2` instead. To return to v3,
+unset the variable, recreate `gira` using `up -d`, and restart HA.
 
 ## Original baseline
 

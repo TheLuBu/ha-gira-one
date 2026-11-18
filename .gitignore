@@ -26,3 +26,6 @@ coverage.xml
 # Home Assistant configuration
 config/*
 !config/configuration.yaml
+
+# Local Compose network or port settings
+/compose.override.yaml

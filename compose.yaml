@@ -1,12 +1,9 @@
 name: ha-gira-dev
-networks:
-  default:
-    ipam:
-      config:
-        - subnet: ${GIRA_DEV_SUBNET:-10.254.230.0/24}
 services:
   hardware:
-    build: .
+    build:
+      context: .
+      target: hardware
     profiles: [hardware]
     command: [python, -m, dev.start_hardware]
     environment:
@@ -31,7 +28,7 @@ services:
     profiles: [demo]
     command: [python, -m, dev.mock_gira]
     environment:
-      GIRA_MOCK_API_VERSION: ${GIRA_MOCK_API_VERSION:-v2}
+      GIRA_MOCK_API_VERSION: ${GIRA_MOCK_API_VERSION:-v3}
     volumes:
       - ./dev:/workspace/dev:ro
     healthcheck:
