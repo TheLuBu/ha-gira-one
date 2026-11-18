@@ -10,7 +10,7 @@ CLIMATE = "climate"
 SWITCH = "switch"
 SENSOR = "sensor"
 SCENE = "scene"
-PLATFORMS = [LIGHT, SWITCH, COVER, CLIMATE, SENSOR, SCENE]
+PLATFORMS = ["button", LIGHT, SWITCH, COVER, CLIMATE, SENSOR, SCENE]
 
 # Configuration
 CONF_HOST = "host"
@@ -30,6 +30,7 @@ DATA_HUB_DEVICE_ID = "hub_device_id"
 
 # Supported Gira function types to HA platforms mapping
 GIRA_FUNCTION_TYPE_TO_HA_PLATFORM = {
+    "de.gira.schema.functions.Trigger": "button",
     "de.gira.schema.functions.Scene": SCENE,
     "de.gira.schema.functions.FunctionScene": SCENE,
     "de.gira.schema.functions.Switch": SWITCH,

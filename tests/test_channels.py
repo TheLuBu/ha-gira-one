@@ -5,8 +5,17 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.components.light import ColorMode
+from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.gira_one import climate, cover, light, scene, sensor, switch
+from custom_components.gira_one import (
+    button,
+    climate,
+    cover,
+    light,
+    scene,
+    sensor,
+    switch,
+)
 from custom_components.gira_one.const import (
     DATA_API_CLIENT,
     DATA_HUB_DEVICE_ID,
@@ -80,7 +89,7 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
         hass = Mock(data={DOMAIN: {"entry": data}})
         entry = Mock(entry_id="entry", domain=DOMAIN)
         found = {}
-        for platform in (switch, cover, light, climate, sensor, scene):
+        for platform in (button, switch, cover, light, climate, sensor, scene):
             add = Mock()
             await platform.async_setup_entry(hass, entry, add)
             found.update({entity.unique_id: entity for entity in add.call_args.args[0]})
@@ -108,6 +117,24 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
                 in {"Switch", "Covering", "ColoredLight"}
             },
         )
+
+    async def test_configured_trigger(self) -> None:
+        """Discover both channel versions and send precisely the configured value."""
+        for channel, command, value in (("Trigger", "Off", 0), ("Trigger2", "On", 1)):
+            fn = fixture(channel)
+            fn["parameters"] = [{"key": "Command", "value": command}]
+            entity = (await self.discover([fn]))[fn["uid"]]
+            await entity.async_press()
+            self.api.set_value.assert_awaited_once_with(
+                fn["dataPoints"][0]["uid"], value
+            )
+            entity = (await self.discover([fn]))[entity.unique_id]
+            self.api.set_value.return_value = False
+            with self.assertRaises(HomeAssistantError):
+                await entity.async_press()
+            self.api.set_value.assert_awaited_once()
+            fn["parameters"].append({"key": "Command", "value": "Off"})
+            self.assertFalse(await self.discover([fn]))
 
     async def test_switch_and_cover_commands_and_feedback(self) -> None:
         """Both channel generations preserve switch and inverted cover semantics."""

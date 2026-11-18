@@ -27,6 +27,7 @@ See the [firmware 4.0 support matrix](docs/FIRMWARE_4_CHANNELS.md) for the chann
 
 | Platform | Capabilities |
 |---|---|
+| **Button** | Execute the configured Trigger or Trigger2 action |
 | **Switch** | On/off |
 | **Light** | On/off, brightness (dimming), color temperature (tunable white), RGB/W color |
 | **Cover** | Open, close, stop, set position, set tilt (slat) position — for roller shutters and venetian blinds |
