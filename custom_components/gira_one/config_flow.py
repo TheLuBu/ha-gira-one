@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api import (
     GiraApiAuthError,
@@ -20,6 +31,7 @@ from .api import (
 )
 from .callback_url import detect_callback_url, normalize_callback_url
 from .const import CLIENT_URN_PREFIX, CONF_CALLBACK_URL, DOMAIN
+from .device_website import GiraDeviceSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +120,12 @@ class GiraOneConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Gira One."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:  # noqa: ARG004
+        """Open the device maintenance dialog for this entry."""
+        return GiraDeviceMaintenanceFlow()
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -248,4 +266,114 @@ class GiraOneConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             errors=errors,
             description_placeholders={"host": self._reauth_entry_data[CONF_HOST]},
+        )
+
+
+class GiraDeviceMaintenanceFlow(OptionsFlow):
+    """Check a one-time device key, then offer an explicit restart."""
+
+    def __init__(self) -> None:
+        """Start without an authenticated website session."""
+        self._device: GiraDeviceSession | None = None
+        self._expiry: asyncio.TimerHandle | None = None
+        self._removed = False
+
+    @callback
+    def _take_session(self) -> GiraDeviceSession | None:
+        if self._expiry is not None:
+            self._expiry.cancel()
+            self._expiry = None
+        session, self._device = self._device, None
+        return session
+
+    @callback
+    def _expire(self) -> None:
+        if session := self._take_session():
+            self.hass.async_create_task(session.close())
+
+    @callback
+    def async_remove(self) -> None:
+        """Release the session when the user dismisses the dialog."""
+        self._removed = True
+        self._expire()
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Verify the key without writing it to flow results or the entry."""
+        host = self.config_entry.data[CONF_HOST]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            session = GiraDeviceSession(self.hass, host)
+            try:
+                await session.login(user_input[CONF_PASSWORD])
+                _LOGGER.info("Gira device login verified")
+                if self._removed:
+                    return self.async_abort(reason="session_expired")
+                self._expire()
+                self._device = session
+                self._expiry = self.hass.loop.call_later(120, self._expire)
+                return await self.async_step_confirm_restart()
+            except GiraApiAuthError:
+                _LOGGER.warning("Gira device login could not be verified")
+                errors["base"] = "invalid_device_key"
+            except GiraApiConnectionError:
+                _LOGGER.warning("Gira device login unconfirmed: connection failed")
+                errors["base"] = "cannot_connect"
+            except GiraApiRequestError:
+                _LOGGER.warning("Gira device login unconfirmed: device website error")
+                errors["base"] = "device_error"
+            finally:
+                if self._device is not session:
+                    await session.close()
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
+                }
+            ),
+            description_placeholders={"host": host},
+            errors=errors,
+        )
+
+    async def async_step_confirm_restart(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The default submission finishes after checking the login."""
+        if self._device is None:
+            return self.async_abort(reason="session_expired")
+        if user_input is None:
+            return self.async_show_form(
+                step_id="confirm_restart",
+                data_schema=vol.Schema({vol.Required("restart", default=False): bool}),
+                description_placeholders={"host": self.config_entry.data[CONF_HOST]},
+                last_step=True,
+            )
+        session = self._take_session()
+        assert session is not None
+        try:
+            if user_input.get("restart") is True:
+                await session.restart()
+                _LOGGER.info("Gira One Server accepted the restart request")
+            else:
+                _LOGGER.info(
+                    "Gira device login check finished without requesting a restart"
+                )
+        except GiraApiAuthError:
+            _LOGGER.warning("Gira One Server denied the restart request")
+            return self.async_abort(reason="restart_denied")
+        except (GiraApiConnectionError, GiraApiRequestError):
+            _LOGGER.warning("Gira One Server did not confirm the restart request")
+            return self.async_abort(reason="restart_unconfirmed")
+        finally:
+            await session.close()
+        # Options flows render a generic message when saving options. Finish with
+        # a translated reason instead: this action has no options to persist.
+        return self.async_abort(
+            reason="restart_requested"
+            if user_input.get("restart") is True
+            else "login_verified",
         )

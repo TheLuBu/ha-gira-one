@@ -48,6 +48,36 @@
       "reauth_successful": "Neuauthentifizierung erfolgreich."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Geräteanmeldung prüfen",
+        "description": "Gib den Anlagenschlüssel für {host} ein. Home Assistant verwendet ihn einmalig für diese Anmeldeprüfung.",
+        "data": {
+          "password": "Anlagenschlüssel"
+        }
+      },
+      "confirm_restart": {
+        "title": "Geräteanmeldung erfolgreich",
+        "description": "Du bist auf {host} angemeldet. Lass das Feld leer, um die Prüfung abzuschließen. Für einen Neustart setze den Haken und bestätige innerhalb von zwei Minuten. Der Gira One Server ist dann kurzzeitig nicht erreichbar.",
+        "data": {
+          "restart": "Gira One Server jetzt neu starten"
+        }
+      }
+    },
+    "error": {
+      "invalid_device_key": "Geräteanmeldung fehlgeschlagen. Prüfe den Anlagenschlüssel.",
+      "cannot_connect": "Die Gerätewebseite ist nicht erreichbar.",
+      "device_error": "Die Gerätewebseite konnte die Anmeldeprüfung nicht abschließen."
+    },
+    "abort": {
+      "session_expired": "Die Sitzung ist beendet. Öffne den Dialog erneut, um dich anzumelden.",
+      "restart_denied": "Das Gerät hat den Neustart abgelehnt. Melde dich für eine neue Sitzung erneut an.",
+      "restart_unconfirmed": "Der Server hat den Neustartauftrag nicht bestätigt. Prüfe seinen Status, bevor du es erneut versuchst.",
+      "login_verified": "Geräteanmeldung erfolgreich. Die Prüfung ist abgeschlossen. Es wurde kein Neustart angefordert.",
+      "restart_requested": "Der Gira One Server hat den Neustartauftrag angenommen."
+    }
+  },
   "entity": {
     "sensor": {
       "current_temperature": {
