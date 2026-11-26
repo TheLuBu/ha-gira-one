@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0-beta.2](https://github.com/TheLuBu/ha-gira-one/compare/v1.1.0-beta.2...v1.2.0-beta.2) (2026-11-26)
+
+
+### Features
+
+* verify device login and confirm Gira server restarts ([295403a](https://github.com/TheLuBu/ha-gira-one/commit/295403a3d5288b61c16097794960e409decd346b))
+
 ## [1.1.0-beta.2](https://github.com/TheLuBu/ha-gira-one/compare/v1.1.0-beta.1...v1.1.0-beta.2) (2026-11-18)
 
 
