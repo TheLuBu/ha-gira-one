@@ -6,9 +6,7 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import datetime, timedelta
-from ipaddress import ip_address
 from typing import Any
-from urllib.parse import urlsplit
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -19,7 +17,6 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .api import (
     GiraApiAuthError,
@@ -28,8 +25,10 @@ from .api import (
     GiraApiConnectionError,
     GiraApiRequestError,
 )
+from .callback_url import detect_callback_url, normalize_callback_url
 from .const import (
     API_VERSION,
+    CONF_CALLBACK_URL,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -437,32 +436,13 @@ async def _async_register_callbacks(
     hass: HomeAssistant, entry: ConfigEntry, api_client: GiraApiClient
 ) -> bool:
     """Register callback URLs and views with Home Assistant and the Gira device."""
-    try:
-        base_url = get_url(
-            hass,
-            require_ssl=True,
-            allow_internal=True,
-            allow_external=True,
-            allow_ip=True,
-            prefer_external=True,
-        )
-    except NoURLAvailableError:
+    override = entry.data.get(CONF_CALLBACK_URL)
+    base_url = (
+        normalize_callback_url(override) if override else detect_callback_url(hass)
+    )
+    if not base_url:
         _LOGGER.error(
-            "Cannot determine an HTTPS URL for Gira callbacks. The Gira One "
-            "Server only accepts HTTPS callback URLs. Configure either an "
-            "internal_url or external_url with https:// in Home Assistant"
-        )
-        return False
-
-    hostname = urlsplit(base_url).hostname
-    try:
-        address = ip_address(hostname)
-        invalid_host = address.is_loopback or address.is_unspecified
-    except ValueError:
-        invalid_host = hostname == "localhost"
-    if invalid_host:
-        _LOGGER.error(
-            "Gira callbacks require a reachable address, not localhost or a loopback IP"
+            "Cannot determine an HTTPS URL for Gira callbacks. Reconfigure the Gira One entry and enter a reachable HTTPS callback base URL"
         )
         return False
 

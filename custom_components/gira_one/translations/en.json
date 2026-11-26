@@ -6,7 +6,12 @@
         "data": {
           "host": "Server IP Address",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "callback_url": "Manual callback base URL"
+        },
+        "description": "Detected HTTPS address: **{detected_url}**. A dash means no address was found.",
+        "data_description": {
+          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed. The callback paths are added automatically."
         }
       },
       "reauth_confirm": {
@@ -16,6 +21,16 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reconfigure": {
+        "title": "Change callback address",
+        "description": "Detected HTTPS address: **{detected_url}**. A dash means no address was found.",
+        "data": {
+          "callback_url": "Manual callback base URL"
+        },
+        "data_description": {
+          "callback_url": "Leave empty for automatic detection. To override, enter the Home Assistant HTTPS address reachable from the Gira server, including the port if needed. The callback paths are added automatically."
+        }
       }
     },
     "error": {
@@ -24,7 +39,9 @@
       "registration_failed": "Failed to register client with the Gira One Server.",
       "device_locked": "The Gira One Server is currently locked. Try again later.",
       "api_error": "An unexpected API error occurred.",
-      "unknown": "An unknown error occurred."
+      "unknown": "An unknown error occurred.",
+      "invalid_callback_url": "Enter a reachable HTTPS origin with a host and optional port. Remove any path, credentials or URL parameters.",
+      "callback_url_required": "No HTTPS address was found. Enter the Home Assistant HTTPS base URL."
     },
     "abort": {
       "already_configured": "This Gira One Server is already configured.",
