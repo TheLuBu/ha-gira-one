@@ -31,6 +31,36 @@
       "reauth_successful": "Reauthentication was successful."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Check device login",
+        "description": "Enter the device key for {host}. Home Assistant uses it once for this login check.",
+        "data": {
+          "password": "Device key"
+        }
+      },
+      "confirm_restart": {
+        "title": "Device login successful",
+        "description": "You are signed in to {host}. Leave the box unchecked to finish. To restart the Gira One Server, select the box and confirm within two minutes. The server will be briefly unavailable.",
+        "data": {
+          "restart": "Restart the Gira One Server now"
+        }
+      }
+    },
+    "error": {
+      "invalid_device_key": "Device login failed. Check the device key.",
+      "cannot_connect": "The device website could not be reached.",
+      "device_error": "The device website could not complete the login check."
+    },
+    "abort": {
+      "session_expired": "The session has ended. Open the dialog again to sign in.",
+      "restart_denied": "The device denied the restart. Sign in again to start a new session.",
+      "restart_unconfirmed": "The server did not confirm the restart request. Check its status before trying again.",
+      "login_verified": "Device login successful. The check is complete. No restart was requested.",
+      "restart_requested": "The Gira One Server accepted the restart request."
+    }
+  },
   "entity": {
     "sensor": {
       "current_temperature": {

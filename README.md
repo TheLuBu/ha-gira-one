@@ -112,6 +112,23 @@ After installation, add the integration via the UI:
 
 Compatible devices will be added automatically and grouped by room (using the Gira project's location names as suggested areas).
 
+### Check the device key or restart the server
+
+Open **Settings → Devices & services → Gira One → Configure** and enter the
+device website's **Anlagenschlüssel**. The integration checks the login over
+HTTPS and keeps the authenticated session in memory for up to two minutes.
+It does not store the key. As with the existing Gira connection, the integration
+accepts the server's self-signed certificate without verifying its identity.
+
+To finish after checking the login, leave the restart box unchecked. To request
+a restart, select **Restart the Gira One Server now** on the second screen and
+confirm. Closing the dialog also ends the session. This uses the device website
+protocol from firmware 4.0.465.0, which can change with firmware updates.
+
+To see verified logins and accepted restart requests in the Home Assistant log,
+set `custom_components.gira_one.config_flow` to `info` under `logger.logs`.
+The dialog logs fixed outcome messages without credentials or session data.
+
 ## Troubleshooting
 
 **Setup fails with "Cannot determine an HTTPS URL".**
